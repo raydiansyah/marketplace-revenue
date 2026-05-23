@@ -1,10 +1,11 @@
 /**
  * Module: AI Insights API
  * Purpose: Generate AI-powered revenue insights for a saved report (per-user, rate-limited)
+ *          Injects active persona system prompt + RAG context into each AI call.
  * Used by: src/components/ai/AiInsightPanel.tsx
  * Dependencies: src/lib/auth/session, src/lib/db/schema, src/lib/ai/*, src/lib/rate-limiter
  * Public functions: POST ({ reportId, kind } → { markdown, model, tokensIn, tokensOut, cacheReadTokens })
- * Side effects: 1 AI API call, 1 DB read (saved_reports), 1 DB write (ai_request_logs)
+ * Side effects: 1 AI API call, 1 DB read (saved_reports), 1 DB read (ai_agent_personas + rag_chunks), 1 DB write (ai_request_logs)
  *
  * Rate limit: 30 requests/hour per user
  */
@@ -17,8 +18,8 @@ import { savedReports, aiRequestLogs } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/session";
 import { getActiveProvider } from "@/lib/ai/provider-factory";
 import { summarizeReport } from "@/lib/ai/summarizeReport";
-import { SYSTEM_PROMPT } from "@/lib/ai/prompts/system";
 import { checkHourlyRateLimit } from "@/lib/rate-limiter";
+import { getActivePersonaSystemPrompt, retrieveRelevantChunks, buildRagContext } from "@/lib/ai/rag";
 import type { AiInsightKind } from "@/lib/types";
 import { and, eq } from "drizzle-orm";
 
@@ -86,13 +87,23 @@ export async function POST(req: NextRequest) {
 
     const reportSummary = summarizeReport(reportJson, kind);
     const prompt = buildPrompt(kind, reportSummary);
+
+    // Load active persona + RAG context in parallel
+    const [personaSystem, ragChunkTexts] = await Promise.all([
+      getActivePersonaSystemPrompt(),
+      retrieveRelevantChunks(reportSummary, 5),
+    ]);
+
+    const ragContext = buildRagContext(ragChunkTexts);
+    const effectiveSystem = ragContext ? `${personaSystem}\n\n${ragContext}` : personaSystem;
+
     const logId = randomUUID();
     const startMs = Date.now();
 
     try {
       const result = await generateText({
         model: provider.modelInstance,
-        system: SYSTEM_PROMPT,
+        system: effectiveSystem,
         prompt,
         maxOutputTokens: 1024,
       });

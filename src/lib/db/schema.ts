@@ -3,18 +3,20 @@
  * Purpose: Drizzle ORM table definitions for TiDB (MySQL-compatible)
  * Used by: src/lib/db/client.ts, all API routes via query helpers
  * Dependencies: drizzle-orm/mysql-core
- * Tables: users, savedReports, hppEntries, userConfigs, passwordResetTokens, stores, monthlyUploads, hppMarketplaceEntries, adsEntries, cashflowEntries, aiProviders, aiRequestLogs, refreshTokens, accessTokenBlacklist, loginEvents
+ * Tables: users, savedReports, hppEntries, userConfigs, passwordResetTokens, stores, monthlyUploads, hppMarketplaceEntries, adsEntries, cashflowEntries, aiProviders, aiRequestLogs, refreshTokens, accessTokenBlacklist, loginEvents, aiAgentPersonas, ragDocuments, ragChunks
  * Side effects: Schema changes require npm run db:generate then db:migrate
  * Phase 2: savedReports extended with storeId, periodYear, periodMonth
  * Phase 3: hppMarketplaceEntries added for per-marketplace HPP management
  * Phase 4: adsEntries + cashflowEntries added for Ads & Cashflow modules
  * Phase 5: aiProviders + aiRequestLogs added for AI features
  * Phase 6: refreshTokens + accessTokenBlacklist + loginEvents added for JWT hardening
+ * Phase 7: aiAgentPersonas + ragDocuments + ragChunks added for RAG + persona management
  */
 
 import {
   mysqlTable,
   varchar,
+  text,
   timestamp,
   json,
   index,
@@ -446,3 +448,52 @@ export const loginEvents = mysqlTable("login_events", {
 }));
 
 export type LoginEventRow = typeof loginEvents.$inferSelect;
+
+// ============================================================
+// AI AGENT PERSONAS (Phase 7)
+// ============================================================
+
+export const aiAgentPersonas = mysqlTable("ai_agent_personas", {
+  id: varchar("id", { length: 40 }).primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  description: varchar("description", { length: 500 }),
+  systemPrompt: text("system_prompt").notNull(),
+  tone: mysqlEnum("tone", ["formal", "casual", "expert", "friendly"]).default("formal").notNull(),
+  isDefault: tinyint("is_default").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+}, (t) => ({
+  defaultIdx: index("idx_persona_default").on(t.isDefault),
+}));
+
+export type AiAgentPersonaRow = typeof aiAgentPersonas.$inferSelect;
+
+// ============================================================
+// RAG DOCUMENTS (Phase 7)
+// ============================================================
+
+export const ragDocuments = mysqlTable("rag_documents", {
+  id: varchar("id", { length: 40 }).primaryKey(),
+  title: varchar("title", { length: 255 }).notNull(),
+  fileName: varchar("file_name", { length: 255 }).notNull(),
+  charCount: int("char_count").default(0).notNull(),
+  chunkCount: int("chunk_count").default(0).notNull(),
+  uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
+});
+
+export type RagDocumentRow = typeof ragDocuments.$inferSelect;
+
+// ============================================================
+// RAG CHUNKS (Phase 7)
+// ============================================================
+
+export const ragChunks = mysqlTable("rag_chunks", {
+  id: varchar("id", { length: 40 }).primaryKey(),
+  documentId: varchar("document_id", { length: 40 }).notNull(),
+  chunkIndex: int("chunk_index").notNull(),
+  content: text("content").notNull(),
+}, (t) => ({
+  docIdx: index("idx_rag_chunks_doc").on(t.documentId),
+}));
+
+export type RagChunkRow = typeof ragChunks.$inferSelect;

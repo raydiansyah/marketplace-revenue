@@ -520,3 +520,31 @@ export interface AiInsightResult {
   tokensOut: number;
   cacheReadTokens: number;
 }
+
+// ============================================================
+// AI AGENT PERSONAS
+// ============================================================
+
+export interface AiAgentPersona {
+  id: string;
+  name: string;
+  description?: string;
+  systemPrompt: string;
+  tone: "formal" | "casual" | "expert" | "friendly";
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ============================================================
+// RAG DOCUMENTS
+// ============================================================
+
+export interface RagDocument {
+  id: string;
+  title: string;
+  fileName: string;
+  charCount: number;
+  chunkCount: number;
+  uploadedAt: string;
+}
