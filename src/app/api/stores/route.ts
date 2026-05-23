@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 import { requireSession } from '@/lib/auth/session'
 import { getStores, createStore } from '@/lib/db/queries/stores'
-import type { MarketplaceId } from '@/lib/types'
+import type { MarketplaceId, StoreSummary } from '@/lib/types'
 
 const VALID_MARKETPLACES: MarketplaceId[] = ['shopee', 'tokopedia', 'lazada']
 
@@ -72,7 +72,16 @@ export async function POST(req: NextRequest) {
       externalShopId: typeof externalShopId === 'string' ? externalShopId.trim() || undefined : undefined,
     })
 
-    return NextResponse.json({ id, storeName: storeName.trim(), marketplace }, { status: 201 })
+    const store: StoreSummary = {
+      id,
+      userId: session.sub,
+      marketplace: marketplace as MarketplaceId,
+      storeName: storeName.trim(),
+      isActive: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+    return NextResponse.json({ store }, { status: 201 })
   } catch (e) {
     if (e instanceof Response) return e
     if (isDupEntryError(e)) {

@@ -1,15 +1,34 @@
 /**
  * Module: Stores API — item routes
- * Purpose: Update and soft-delete a single store record
- * Used by: /upload (store settings), /data-bank (rename/deactivate)
+ * Purpose: Get, update, and soft-delete a single store record
+ * Used by: /upload (store name lookup on select), /data-bank (rename/deactivate)
  * Dependencies: auth/session, db/queries/stores
- * Public functions: PATCH /api/stores/[id], DELETE /api/stores/[id]
- * Side effects: writes stores table in TiDB (update only — never hard-delete)
+ * Public functions: GET /api/stores/[id], PATCH /api/stores/[id], DELETE /api/stores/[id]
+ * Side effects: reads/writes stores table in TiDB (update only — never hard-delete)
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth/session'
-import { updateStore, softDeleteStore } from '@/lib/db/queries/stores'
+import { getStoreById, updateStore, softDeleteStore } from '@/lib/db/queries/stores'
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await requireSession()
+    const { id } = await params
+    const store = await getStoreById(id, session.sub)
+    if (!store) {
+      return NextResponse.json({ error: 'Store tidak ditemukan' }, { status: 404 })
+    }
+    return NextResponse.json({ store })
+  } catch (e) {
+    if (e instanceof Response) return e
+    console.error('[GET /api/stores/:id]', e)
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
+  }
+}
 
 export async function PATCH(
   req: NextRequest,
