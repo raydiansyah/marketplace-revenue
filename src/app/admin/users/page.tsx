@@ -206,7 +206,7 @@ export default function AdminUsersPage() {
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold action-primary disabled:opacity-50 text-white rounded-lg transition-colors"
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold action-primary disabled:opacity-50 rounded-lg transition-colors"
                 >
                   {submitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                   Simpan

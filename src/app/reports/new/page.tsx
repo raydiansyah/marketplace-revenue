@@ -85,7 +85,7 @@ export default function NewReportPage() {
         {/* Step 1: Marketplace */}
         <div className="panel-card p-5 space-y-3">
           <div className="flex items-center gap-2">
-            <span className="w-6 h-6 rounded-full bg-[var(--accent)] text-white text-xs font-bold flex items-center justify-center">1</span>
+            <span className="w-6 h-6 rounded-full bg-[var(--accent)] text-[var(--background)] text-xs font-bold flex items-center justify-center">1</span>
             <h2 className="text-sm font-semibold text-[var(--foreground)]">Pilih Marketplace</h2>
           </div>
           <div className="grid grid-cols-3 gap-2">
@@ -111,7 +111,7 @@ export default function NewReportPage() {
         {/* Step 2: Store + Period */}
         <div className={`panel-card p-5 space-y-4 transition-opacity ${marketplace ? "opacity-100" : "opacity-40 pointer-events-none"}`}>
           <div className="flex items-center gap-2">
-            <span className="w-6 h-6 rounded-full bg-[var(--accent)] text-white text-xs font-bold flex items-center justify-center">2</span>
+            <span className="w-6 h-6 rounded-full bg-[var(--accent)] text-[var(--background)] text-xs font-bold flex items-center justify-center">2</span>
             <h2 className="text-sm font-semibold text-[var(--foreground)]">Pilih Toko & Periode</h2>
           </div>
 
@@ -136,7 +136,7 @@ export default function NewReportPage() {
         {/* Step 3: Kalkulasi */}
         <div className={`panel-card p-5 space-y-4 transition-opacity ${canCalculate ? "opacity-100" : "opacity-40 pointer-events-none"}`}>
           <div className="flex items-center gap-2">
-            <span className="w-6 h-6 rounded-full bg-[var(--accent)] text-white text-xs font-bold flex items-center justify-center">3</span>
+            <span className="w-6 h-6 rounded-full bg-[var(--accent)] text-[var(--background)] text-xs font-bold flex items-center justify-center">3</span>
             <h2 className="text-sm font-semibold text-[var(--foreground)]">Hitung Laporan</h2>
           </div>
 

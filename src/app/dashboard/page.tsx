@@ -2079,7 +2079,7 @@ function SaveReportCard({
           />
           <button
             onClick={handleSaveByStore}
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[var(--brand)] text-white rounded-lg text-sm font-medium hover:bg-[var(--brand-hover)]"
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[var(--brand)] text-[var(--background)] rounded-lg text-sm font-medium hover:bg-[var(--brand-hover)]"
           >
             <Save className="w-4 h-4" />
             Simpan
@@ -2661,7 +2661,7 @@ function GlobalDashboardSection({
             onClick={() => setPeriodPreset(opt.value)}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
               periodPreset === opt.value
-                ? "bg-[var(--brand)] border-[var(--brand)] text-white"
+                ? "bg-[var(--brand)] border-[var(--brand)] text-[var(--background)]"
                 : "border-[var(--border-subtle)] text-[var(--text-subtle)] hover:border-[var(--brand)]/50 hover:text-[var(--foreground)]"
             }`}
           >
@@ -3731,7 +3731,7 @@ function ExportButtons() {
       </button>
       <button
         onClick={handlePdfExport}
-        className="flex items-center gap-1.5 px-3 py-2 bg-[var(--brand)] text-white rounded-lg text-sm hover:bg-[var(--brand-hover)] transition-colors"
+        className="flex items-center gap-1.5 px-3 py-2 bg-[var(--brand)] text-[var(--background)] rounded-lg text-sm hover:bg-[var(--brand-hover)] transition-colors"
       >
         <Download className="w-4 h-4" />
         PDF

@@ -1,3 +1,11 @@
+/**
+ * Module: Dashboard Snapshot Laporan Tersimpan
+ * Purpose: Tampilkan charts, KPI, dan tabel detail per pesanan dari saved report (DB)
+ * Used by: /reports/[id]/dashboard route (linked dari detail report)
+ * Dependencies: /api/reports/[id], RevenueBarChart, FeePieChart, lucide-react
+ * Public functions: SavedReportDashboardPage (default export), SortHeader, SummaryCard
+ * Side effects: GET /api/reports/[id] (TiDB read); clipboard write saat copy order ID
+ */
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -354,269 +362,262 @@ export default function SavedReportDashboardPage({ params }: { params: Promise<{
   return (
     <AuthAreaLayout contentClassName="dashboard-theme px-4 py-8 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-[1320px] space-y-6">
-        <section className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--surface)] p-4 sm:p-5">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <Link href={reportRow ? `/reports/${reportRow.id}` : "/reports"} className="inline-flex items-center gap-1 text-xs text-[var(--text-subtle)] hover:text-[var(--foreground)]">
-                <ArrowLeft className="h-3.5 w-3.5" /> Kembali ke detail laporan
-              </Link>
-              <h1 className="mt-2 text-3xl font-black tracking-tight text-[var(--foreground)]">Dashboard Report Snapshot</h1>
-              <p className="mt-1 text-sm text-[var(--text-subtle)]">
-                {reportRow ? `${reportRow.label} • ${new Date(reportRow.createdAt).toLocaleString("id-ID")}` : "Memuat data report"}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="hidden items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-muted)] px-3 py-2 text-sm text-[var(--text-subtle)] sm:inline-flex">
-                <CalendarDays className="h-4 w-4" /> {periodLabel}
-              </div>
-              {reportRow && (
-                <Link
-                  href={`/reports/${reportRow.id}`}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--border-subtle)] px-3 py-2 text-sm text-[var(--foreground)] hover:bg-[var(--surface-muted)]"
-                >
-                  <ExternalLink className="h-4 w-4" /> Detail Report
-                </Link>
-              )}
-            </div>
+
+        {/* Header — standalone, no outer card wrapper */}
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <Link href={reportRow ? `/reports/${reportRow.id}` : "/reports"} className="inline-flex items-center gap-1 text-xs text-[var(--text-subtle)] hover:text-[var(--foreground)]">
+              <ArrowLeft className="h-3.5 w-3.5" /> Kembali ke detail laporan
+            </Link>
+            <h1 className="mt-2 text-3xl font-black tracking-tight text-[var(--foreground)]">Dashboard Report Snapshot</h1>
+            <p className="mt-1 text-sm text-[var(--text-subtle)]">
+              {reportRow ? `${reportRow.label} • ${new Date(reportRow.createdAt).toLocaleString("id-ID")}` : "Memuat data report"}
+            </p>
           </div>
+          <div className="flex items-center gap-2">
+            <div className="hidden items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-muted)] px-3 py-2 text-sm text-[var(--text-subtle)] sm:inline-flex">
+              <CalendarDays className="h-4 w-4" /> {periodLabel}
+            </div>
+            {reportRow && (
+              <Link
+                href={`/reports/${reportRow.id}`}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--border-subtle)] px-3 py-2 text-sm text-[var(--foreground)] hover:bg-[var(--surface-muted)]"
+              >
+                <ExternalLink className="h-4 w-4" /> Detail Report
+              </Link>
+            )}
+          </div>
+        </div>
 
-          {loading ? (
-            <div className="mt-6 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-muted)] px-5 py-8 text-center">
-              <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-[var(--text-subtle)]" />
-              <p className="text-sm text-[var(--text-subtle)]">Memuat dashboard report...</p>
+        {loading ? (
+          <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-muted)] px-5 py-8 text-center">
+            <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-[var(--text-subtle)]" />
+            <p className="text-sm text-[var(--text-subtle)]">Memuat dashboard report...</p>
+          </div>
+        ) : error ? (
+          <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4">
+            <p className="text-sm text-red-300">{error}</p>
+          </div>
+        ) : !report ? (
+          <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-muted)] px-5 py-4">
+            <p className="text-sm text-[var(--text-subtle)]">Data report tidak tersedia.</p>
+          </div>
+        ) : (
+          <>
+            {/* KPI cards */}
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              <SummaryCard label="Total Revenue" value={formatRupiah(report.totalRevenue)} />
+              <SummaryCard
+                label="Gross Profit"
+                value={formatRupiah(report.totalGrossProfit)}
+                color={report.totalGrossProfit >= 0 ? "text-emerald-400" : "text-red-400"}
+              />
+              <SummaryCard
+                label="Biaya Platform"
+                value={formatRupiah(report.totalPlatformFees)}
+                color="text-red-400"
+              />
+              <SummaryCard
+                label="Net Profit"
+                value={formatRupiah(report.totalNetProfit)}
+                color={report.totalNetProfit >= 0 ? "text-emerald-400" : "text-red-400"}
+                sub={`Margin ${formatPercent(netMargin)}`}
+              />
             </div>
-          ) : error ? (
-            <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4">
-              <p className="text-sm text-red-300">{error}</p>
+
+            {/* Charts */}
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+              <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface)] p-5">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-[var(--foreground)]">Cash Flow Marketplace</h3>
+                  <span className="text-xs text-[var(--text-subtle)]">Mode: Report Snapshot</span>
+                </div>
+                <RevenueBarChart marketplaces={report.marketplaces} />
+              </section>
+
+              <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface)] p-5">
+                <h3 className="mb-4 text-sm font-semibold text-[var(--foreground)]">Breakdown Biaya Platform</h3>
+                <FeePieChart marketplaces={report.marketplaces} />
+              </section>
             </div>
-          ) : !report ? (
-            <div className="mt-6 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-muted)] px-5 py-4">
-              <p className="text-sm text-[var(--text-subtle)]">Data report tidak tersedia.</p>
-            </div>
-          ) : (
-            <>
-              <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-                <SummaryCard label="Total Revenue" value={formatRupiah(report.totalRevenue)} />
-                <SummaryCard
-                  label="Gross Profit"
-                  value={formatRupiah(report.totalGrossProfit)}
-                  color={report.totalGrossProfit >= 0 ? "text-emerald-400" : "text-red-400"}
-                />
-                <SummaryCard
-                  label="Biaya Platform"
-                  value={formatRupiah(report.totalPlatformFees)}
-                  color="text-red-400"
-                />
-                <SummaryCard
-                  label="Net Profit"
-                  value={formatRupiah(report.totalNetProfit)}
-                  color={report.totalNetProfit >= 0 ? "text-emerald-400" : "text-red-400"}
-                  sub={`Margin ${formatPercent(netMargin)}`}
-                />
+
+            {/* Orders table */}
+            <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface)]">
+              <div className="border-b border-[var(--border-subtle)] px-5 py-4">
+                <h3 className="font-semibold text-[var(--foreground)]">Detail Per Pesanan</h3>
+                <p className="mt-1 text-xs text-[var(--text-subtle)]">
+                  Tabel audit report tersimpan dengan filter, sortir, dan pagination.
+                </p>
               </div>
 
-              <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-                <section className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--surface)] p-5">
-                  <div className="mb-4 flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-[var(--foreground)]">Cash Flow Marketplace</h3>
-                    <span className="text-xs text-[var(--text-subtle)]">Mode: Report Snapshot</span>
+              <div className="border-b border-[var(--border-subtle)] bg-[var(--surface-muted)]/60 px-5 py-4">
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_180px_160px_140px]">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-subtle)]" />
+                    <input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Cari order ID, produk, SKU"
+                      className="field-input pl-9"
+                    />
                   </div>
-                  <RevenueBarChart marketplaces={report.marketplaces} />
-                </section>
-
-                <section className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--surface)] p-5">
-                  <h3 className="mb-4 text-sm font-semibold text-[var(--foreground)]">Breakdown Biaya Platform</h3>
-                  <FeePieChart marketplaces={report.marketplaces} />
-                </section>
+                  <select
+                    value={marketplaceFilter}
+                    onChange={(e) => setMarketplaceFilter(e.target.value as "all" | MarketplaceId)}
+                    className="field-input"
+                  >
+                    <option value="all">Semua marketplace</option>
+                    {Object.entries(MARKETPLACE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={profitFilter}
+                    onChange={(e) => setProfitFilter(e.target.value as "all" | "profit" | "loss")}
+                    className="field-input"
+                  >
+                    <option value="all">Semua profit</option>
+                    <option value="profit">Profit (+)</option>
+                    <option value="loss">Rugi (-)</option>
+                  </select>
+                  <select
+                    value={String(rowsPerPage)}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setRowsPerPage(value === "all" ? "all" : Number(value));
+                    }}
+                    className="field-input"
+                  >
+                    <option value="5">5 rows</option>
+                    <option value="10">10 rows</option>
+                    <option value="20">20 rows</option>
+                    <option value="50">50 rows</option>
+                    <option value="100">100 rows</option>
+                    <option value="all">All rows</option>
+                  </select>
+                </div>
               </div>
 
-              <section className="mt-6 rounded-3xl border border-[var(--border-subtle)] bg-[var(--surface)]">
-                <div className="border-b border-[var(--border-subtle)] px-5 py-4">
-                  <h3 className="font-semibold text-[var(--foreground)]">Detail Per Pesanan</h3>
-                  <p className="mt-1 text-xs text-[var(--text-subtle)]">
-                    Tabel audit report tersimpan dengan filter, sortir, dan pagination.
-                  </p>
-                </div>
-
-                <div className="border-b border-[var(--border-subtle)] bg-[var(--surface-muted)]/60 px-5 py-4">
-                  <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_180px_160px_140px]">
-                    <div className="relative">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-subtle)]" />
-                      <input
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        placeholder="Cari order ID, produk, SKU"
-                        className="field-input pl-9"
-                      />
-                    </div>
-                    <select
-                      value={marketplaceFilter}
-                      onChange={(e) => setMarketplaceFilter(e.target.value as "all" | MarketplaceId)}
-                      className="field-input"
-                    >
-                      <option value="all">Semua marketplace</option>
-                      {Object.entries(MARKETPLACE_LABELS).map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={profitFilter}
-                      onChange={(e) => setProfitFilter(e.target.value as "all" | "profit" | "loss")}
-                      className="field-input"
-                    >
-                      <option value="all">Semua profit</option>
-                      <option value="profit">Profit (+)</option>
-                      <option value="loss">Rugi (-)</option>
-                    </select>
-                    <select
-                      value={String(rowsPerPage)}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setRowsPerPage(value === "all" ? "all" : Number(value));
-                      }}
-                      className="field-input"
-                    >
-                      <option value="5">5 rows</option>
-                      <option value="10">10 rows</option>
-                      <option value="20">20 rows</option>
-                      <option value="50">50 rows</option>
-                      <option value="100">100 rows</option>
-                      <option value="all">All rows</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[1500px] text-xs">
-                    <thead>
-                      <tr className="border-b border-[var(--border-subtle)] bg-[var(--surface-muted)]">
-                        <SortHeader label="Order ID" onClick={() => toggleSort("orderId")} />
-                        <SortHeader label="Tanggal" onClick={() => toggleSort("orderDate")} />
-                        <SortHeader label="Produk" onClick={() => toggleSort("productName")} />
-                        <SortHeader label="SKU" onClick={() => toggleSort("sku")} />
-                        <SortHeader label="Marketplace" onClick={() => toggleSort("marketplace")} />
-                        <SortHeader label="Qty" align="right" onClick={() => toggleSort("qty")} />
-                        <SortHeader label="Revenue" align="right" onClick={() => toggleSort("revenue")} />
-                        <SortHeader label="HPP" align="right" onClick={() => toggleSort("hpp")} />
-                        <SortHeader label="Biaya Platform" align="right" onClick={() => toggleSort("platformFee")} />
-                        <SortHeader label="Net Profit" align="right" onClick={() => toggleSort("netProfit")} />
-                        <SortHeader label="Margin" align="right" onClick={() => toggleSort("margin")} />
-                        <th className="px-3 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-[var(--text-subtle)]">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[var(--border-subtle)]">
-                      {pagedOrders.map((order) => (
-                        <tr key={order.key} className="hover:bg-[var(--surface-soft)]">
-                          <td className="px-3 py-2">
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono text-[var(--foreground)]">{order.orderId}</span>
-                              <button
-                                type="button"
-                                onClick={() => void handleCopyOrderId(order.orderId)}
-                                className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--border-subtle)] text-[var(--text-subtle)] hover:bg-[var(--surface-soft)] hover:text-[var(--foreground)]"
-                                title="Copy order ID"
-                              >
-                                {copiedOrderId === order.orderId ? (
-                                  <Check className="h-3.5 w-3.5 text-emerald-400" />
-                                ) : (
-                                  <Copy className="h-3.5 w-3.5" />
-                                )}
-                              </button>
-                              {order.skuCount > 1 && (
-                                <span className="inline-flex rounded-full border border-cyan-300/40 bg-cyan-300/15 px-2 py-0.5 text-[10px] font-semibold text-cyan-200">
-                                  {order.skuCount} SKU
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-3 py-2 text-[var(--text-subtle)]">{order.orderDate}</td>
-                          <td className="max-w-[240px] truncate px-3 py-2 text-[var(--foreground)]">{order.productName}</td>
-                          <td className="px-3 py-2">
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono text-[var(--text-subtle)]">{order.sku || "-"}</span>
-                              {order.skuCount > 1 && (
-                                <span className="inline-flex rounded-full border border-cyan-300/40 bg-cyan-300/15 px-2 py-0.5 text-[10px] font-semibold text-cyan-200">
-                                  {order.skuCount} SKU
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-3 py-2 text-[var(--text-subtle)]">{MARKETPLACE_LABELS[order.marketplace]}</td>
-                          <td className="px-3 py-2 text-right text-[var(--foreground)]">{formatNumber(order.qty)}</td>
-                          <td className="px-3 py-2 text-right text-[var(--foreground)]">{formatRupiah(order.revenue)}</td>
-                          <td className="px-3 py-2 text-right text-cyan-300">{formatRupiah(order.hpp)}</td>
-                          <td className="px-3 py-2 text-right text-red-400">-{formatRupiah(order.platformFee)}</td>
-                          <td className={`px-3 py-2 text-right font-medium ${order.netProfit >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatRupiah(order.netProfit)}</td>
-                          <td className={`px-3 py-2 text-right ${order.netMargin >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatPercent(order.netMargin)}</td>
-                          <td className="px-3 py-2 text-right">
+              <div className="overflow-x-auto">
+                {/* SKU column removed — info already shown in Order ID cell via badge */}
+                <table className="w-full min-w-[900px] text-xs">
+                  <thead>
+                    <tr className="border-b border-[var(--border-subtle)] bg-[var(--surface-muted)]">
+                      <SortHeader label="Order ID" onClick={() => toggleSort("orderId")} />
+                      <SortHeader label="Tanggal" onClick={() => toggleSort("orderDate")} />
+                      <SortHeader label="Produk" onClick={() => toggleSort("productName")} />
+                      <SortHeader label="Marketplace" onClick={() => toggleSort("marketplace")} />
+                      <SortHeader label="Qty" align="right" onClick={() => toggleSort("qty")} />
+                      <SortHeader label="Revenue" align="right" onClick={() => toggleSort("revenue")} />
+                      <SortHeader label="HPP" align="right" onClick={() => toggleSort("hpp")} />
+                      <SortHeader label="Biaya Platform" align="right" onClick={() => toggleSort("platformFee")} />
+                      <SortHeader label="Net Profit" align="right" onClick={() => toggleSort("netProfit")} />
+                      <SortHeader label="Margin" align="right" onClick={() => toggleSort("margin")} />
+                      <th className="px-2 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-[var(--text-subtle)]">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--border-subtle)]">
+                    {pagedOrders.map((order) => (
+                      <tr key={order.key} className="hover:bg-[var(--surface-soft)]">
+                        <td className="px-2 py-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-[var(--foreground)]">{order.orderId}</span>
                             <button
                               type="button"
-                              onClick={() => setSelectedOrder(order)}
-                              className="rounded-md border border-[var(--border-subtle)] px-2 py-1 text-[10px] font-semibold text-[var(--foreground)] hover:bg-[var(--surface-soft)]"
+                              onClick={() => void handleCopyOrderId(order.orderId)}
+                              className="inline-flex h-5 w-5 items-center justify-center rounded border border-[var(--border-subtle)] text-[var(--text-subtle)] hover:bg-[var(--surface-soft)] hover:text-[var(--foreground)]"
+                              title="Copy order ID"
                             >
-                              Detail
+                              {copiedOrderId === order.orderId ? (
+                                <Check className="h-3 w-3 text-emerald-400" />
+                              ) : (
+                                <Copy className="h-3 w-3" />
+                              )}
                             </button>
-                          </td>
-                        </tr>
-                      ))}
-                      {pagedOrders.length === 0 && (
-                        <tr>
-                          <td colSpan={12} className="px-3 py-6 text-center text-sm text-[var(--text-subtle)]">
-                            Tidak ada order yang cocok dengan filter.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                    {sortedOrders.length > 0 && (
-                      <tfoot>
-                        <tr className="border-t-2 border-[var(--border-subtle)] bg-[var(--surface-muted)]">
-                          <td className="px-3 py-3 font-semibold text-[var(--foreground)]" colSpan={5}>Total (Filtered)</td>
-                          <td className="px-3 py-3 text-right font-semibold text-[var(--foreground)]">{formatNumber(totals.qty)}</td>
-                          <td className="px-3 py-3 text-right font-semibold text-[var(--foreground)]">{formatRupiah(totals.revenue)}</td>
-                          <td className="px-3 py-3 text-right font-semibold text-cyan-300">{formatRupiah(totals.hpp)}</td>
-                          <td className="px-3 py-3 text-right font-semibold text-red-400">-{formatRupiah(totals.platformFee)}</td>
-                          <td className={`px-3 py-3 text-right font-semibold ${totals.netProfit >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatRupiah(totals.netProfit)}</td>
-                          <td className={`px-3 py-3 text-right font-semibold ${(totals.revenue > 0 ? (totals.netProfit / totals.revenue) * 100 : 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                            {formatPercent(totals.revenue > 0 ? (totals.netProfit / totals.revenue) * 100 : 0)}
-                          </td>
-                          <td className="px-3 py-3" />
-                        </tr>
-                      </tfoot>
+                            {order.skuCount > 1 && (
+                              <span className="inline-flex rounded-full border border-cyan-300/40 bg-cyan-300/15 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-200">
+                                {order.skuCount} SKU
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-2 py-1.5 text-[var(--text-subtle)] whitespace-nowrap">{order.orderDate}</td>
+                        <td className="max-w-[200px] truncate px-2 py-1.5 text-[var(--foreground)]">{order.productName}</td>
+                        <td className="px-2 py-1.5 text-[var(--text-subtle)]">{MARKETPLACE_LABELS[order.marketplace]}</td>
+                        <td className="px-2 py-1.5 text-right text-[var(--foreground)]">{formatNumber(order.qty)}</td>
+                        <td className="px-2 py-1.5 text-right text-[var(--foreground)]">{formatRupiah(order.revenue)}</td>
+                        <td className="px-2 py-1.5 text-right text-cyan-300">{formatRupiah(order.hpp)}</td>
+                        <td className="px-2 py-1.5 text-right text-red-400">-{formatRupiah(order.platformFee)}</td>
+                        <td className={`px-2 py-1.5 text-right font-medium ${order.netProfit >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatRupiah(order.netProfit)}</td>
+                        <td className={`px-2 py-1.5 text-right ${order.netMargin >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatPercent(order.netMargin)}</td>
+                        <td className="px-2 py-1.5 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedOrder(order)}
+                            className="rounded border border-[var(--border-subtle)] px-2 py-1 text-[10px] font-semibold text-[var(--foreground)] hover:bg-[var(--surface-soft)]"
+                          >
+                            Detail
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {pagedOrders.length === 0 && (
+                      <tr>
+                        <td colSpan={11} className="px-3 py-6 text-center text-sm text-[var(--text-subtle)]">
+                          Tidak ada order yang cocok dengan filter.
+                        </td>
+                      </tr>
                     )}
-                  </table>
-                </div>
+                  </tbody>
+                  {sortedOrders.length > 0 && (
+                    <tfoot>
+                      <tr className="border-t-2 border-[var(--border-subtle)] bg-[var(--surface-muted)]">
+                        <td className="px-2 py-2.5 font-semibold text-[var(--foreground)]" colSpan={4}>Total (Filtered)</td>
+                        <td className="px-2 py-2.5 text-right font-semibold text-[var(--foreground)]">{formatNumber(totals.qty)}</td>
+                        <td className="px-2 py-2.5 text-right font-semibold text-[var(--foreground)]">{formatRupiah(totals.revenue)}</td>
+                        <td className="px-2 py-2.5 text-right font-semibold text-cyan-300">{formatRupiah(totals.hpp)}</td>
+                        <td className="px-2 py-2.5 text-right font-semibold text-red-400">-{formatRupiah(totals.platformFee)}</td>
+                        <td className={`px-2 py-2.5 text-right font-semibold ${totals.netProfit >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatRupiah(totals.netProfit)}</td>
+                        <td className={`px-2 py-2.5 text-right font-semibold ${(totals.revenue > 0 ? (totals.netProfit / totals.revenue) * 100 : 0) >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          {formatPercent(totals.revenue > 0 ? (totals.netProfit / totals.revenue) * 100 : 0)}
+                        </td>
+                        <td className="px-2 py-2.5" />
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
 
-                {sortedOrders.length > 0 && (
-                  <div className="flex items-center justify-between border-t border-[var(--border-subtle)] bg-[var(--surface-muted)] px-5 py-3">
-                    <p className="text-xs text-[var(--text-subtle)]">
-                      {sortedOrders.length} order terfilter • halaman {page}/{totalPages}
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                        disabled={page <= 1 || rowsPerPage === "all"}
-                        className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs hover:bg-[var(--surface-soft)] disabled:opacity-40"
-                      >
-                        Sebelumnya
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-                        disabled={page >= totalPages || rowsPerPage === "all"}
-                        className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs hover:bg-[var(--surface-soft)] disabled:opacity-40"
-                      >
-                        Berikutnya
-                      </button>
-                    </div>
+              {sortedOrders.length > 0 && (
+                <div className="flex items-center justify-between border-t border-[var(--border-subtle)] bg-[var(--surface-muted)] px-5 py-3">
+                  <p className="text-xs text-[var(--text-subtle)]">
+                    {sortedOrders.length} order terfilter • halaman {page}/{totalPages}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                      disabled={page <= 1 || rowsPerPage === "all"}
+                      className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs hover:bg-[var(--surface-soft)] disabled:opacity-40"
+                    >
+                      Sebelumnya
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                      disabled={page >= totalPages || rowsPerPage === "all"}
+                      className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs hover:bg-[var(--surface-soft)] disabled:opacity-40"
+                    >
+                      Berikutnya
+                    </button>
                   </div>
-                )}
-              </section>
-            </>
-          )}
-        </section>
+                </div>
+              )}
+            </section>
+          </>
+        )}
       </div>
 
       {selectedOrder && (
