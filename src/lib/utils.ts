@@ -1,3 +1,11 @@
+/**
+ * Module: Utils
+ * Purpose: Shared utility functions — class merging (cn) and formatting helpers
+ * Used by: All pages and components throughout the app
+ * Dependencies: clsx, tailwind-merge
+ * Public functions: cn(), formatRupiah(), formatPercent(), formatNumber()
+ * Side effects: None
+ */
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 

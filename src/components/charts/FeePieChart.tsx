@@ -8,7 +8,15 @@ interface Props {
   marketplaces: MarketplaceSummary[];
 }
 
-const FEE_COLORS = ["#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#06b6d4", "#f97316"];
+const FEE_COLORS = [
+  "var(--chart-fee-1)",
+  "var(--chart-fee-2)",
+  "var(--chart-fee-3)",
+  "var(--chart-fee-4)",
+  "var(--chart-fee-5)",
+  "var(--chart-fee-6)",
+  "var(--chart-fee-7)",
+];
 
 export default function FeePieChart({ marketplaces }: Props) {
   const combined = marketplaces.reduce(
@@ -60,9 +68,15 @@ export default function FeePieChart({ marketplaces }: Props) {
         </Pie>
         <Tooltip
           formatter={(value: number, name: string) => [formatRupiah(value), name]}
-          contentStyle={{ borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12 }}
+          contentStyle={{
+            borderRadius: 12,
+            border: "1px solid var(--chart-tooltip-border)",
+            fontSize: 12,
+            backgroundColor: "var(--chart-tooltip-bg)",
+            color: "var(--foreground)",
+          }}
         />
-        <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+        <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: "var(--chart-axis)" }} />
       </PieChart>
     </ResponsiveContainer>
   );

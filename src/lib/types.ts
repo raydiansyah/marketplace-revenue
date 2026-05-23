@@ -412,3 +412,111 @@ export interface MonthlyUploadDetail extends MonthlyUploadRecord {
 export interface MonthlyUploadInsert extends MonthlyUploadRecord {
   parsedJson: unknown[];
 }
+
+// ============================================================
+// HPP MARKETPLACE
+// ============================================================
+
+export interface HppMarketplaceEntry {
+  id: string;
+  userId: string;
+  marketplace: MarketplaceId;
+  sku: string;
+  productName: string;
+  masterSku?: string;
+  masterProductName?: string;
+  cost: number;
+  sourceFileName?: string;
+  uploadedAt: string; // ISO string
+}
+
+export interface HppConflict {
+  sku: string;
+  entries: Array<{
+    id: string;
+    marketplace: MarketplaceId;
+    cost: number;
+    productName: string;
+    uploadedAt: string;
+  }>;
+}
+
+// ============================================================
+// ADS & CASHFLOW
+// ============================================================
+
+export interface AdsEntry {
+  id: string;
+  storeId: string;
+  marketplace: MarketplaceId;
+  periodYear: number;
+  periodMonth: number;
+  campaignName: string;
+  sku?: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  conversions: number;
+  revenue: number;
+  sourceFileName?: string;
+  createdAt: string;
+}
+
+export interface AdsSummary {
+  totalSpend: number;
+  totalRevenue: number;
+  totalImpressions: number;
+  totalClicks: number;
+  totalConversions: number;
+  roas: number;
+  cpa: number;
+}
+
+export type CashflowCategory = "income" | "expense";
+
+export interface CashflowEntry {
+  id: string;
+  storeId: string;
+  periodYear: number;
+  periodMonth: number;
+  category: CashflowCategory;
+  subCategory: string;
+  amount: number;
+  description: string;
+  txnDate: string; // YYYY-MM-DD
+  sourceFileName?: string;
+  createdAt: string;
+}
+
+export interface CashflowSummary {
+  totalIncome: number;
+  totalExpense: number;
+  netCashflow: number;
+}
+
+// ============================================================
+// AI PROVIDERS
+// ============================================================
+
+export type AiProvider = "anthropic" | "openai";
+export type AiInsightKind = "revenue" | "ads-roas" | "fee-anomaly" | "hpp-margin";
+
+export interface AiProviderInfo {
+  id: string;
+  provider: AiProvider;
+  label: string;
+  baseUrl?: string;
+  defaultModel?: string;
+  isActive: boolean;
+  lastTestAt?: string;
+  createdByUserId?: string;
+  createdAt: string;
+}
+
+export interface AiInsightResult {
+  markdown: string;
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
+  cacheReadTokens: number;
+}

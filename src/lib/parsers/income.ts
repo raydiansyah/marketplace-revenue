@@ -1,6 +1,10 @@
 /**
- * Parser untuk file "Transaksi Pendapatan" dari masing-masing marketplace.
- * File ini berisi settlement aktual yang diterima seller, termasuk breakdown biaya.
+ * Module: Income Transaction Parser
+ * Purpose: Menormalkan file "Transaksi Pendapatan" marketplace menjadi IncomeTransaction per order.
+ * Used by: src/app/upload/page.tsx (parseIncomeFile, inspectIncomeWorkbook).
+ * Dependencies: src/lib/parsers/xlsxUtils (reader workbook), src/lib/types (IncomeTransaction, MarketplaceId).
+ * Public functions: parseIncomeFile(), inspectIncomeWorkbook().
+ * Side effects: Tidak ada write DB/network; hanya parsing data file di memori.
  */
 
 import type { IncomeTransaction, MarketplaceId } from "../types";
@@ -66,12 +70,71 @@ function normalizeText(value: string): string {
   return value.toLowerCase().trim();
 }
 
+function resolveMarketplaceOrderIdentity(row: Record<string, string>): {
+  include: boolean;
+  orderId: string;
+} {
+  const rawOrderId = findColumn(row, [
+    "order adjustment id",
+    "order/adjustment id",
+    "order id",
+    "no. pesanan",
+    "invoice",
+    "no invoice",
+  ]).trim();
+  const relatedOrderId = findColumn(row, ["related order id"]).trim();
+  const type = normalizeText(findColumn(row, ["type"]));
+
+  if (!rawOrderId) return { include: false, orderId: "" };
+
+  const isOrderLike = !type || type.includes("order") || type.includes("adjustment");
+  const isBalanceMove = type.includes("withdraw") || type.includes("top up") || type.includes("balance");
+  const isRelatedCompensation =
+    Boolean(relatedOrderId) &&
+    relatedOrderId !== rawOrderId &&
+    (type.includes("reimbursement") || type.includes("compensation") || type.includes("refund"));
+
+  if (isBalanceMove) return { include: false, orderId: "" };
+  if (!isOrderLike && !isRelatedCompensation) return { include: false, orderId: "" };
+
+  return {
+    include: true,
+    orderId: isRelatedCompensation ? relatedOrderId : rawOrderId,
+  };
+}
+
 
 function sumAbsColumns(row: Record<string, string>, candidates: string[]): number {
   return candidates.reduce((sum, candidate) => {
     const value = parseAmount(findColumn(row, [candidate]));
     return sum + Math.abs(value);
   }, 0);
+}
+
+function sumAbsColumnsByHeaderMatch(row: Record<string, string>, candidates: string[]): number {
+  const normalize = (value: string) =>
+    String(value ?? "")
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ");
+
+  const normalizedCandidates = candidates.map(normalize).filter(Boolean);
+  const matchedKeys = new Set<string>();
+
+  for (const key of Object.keys(row)) {
+    const normalizedKey = normalize(key);
+    if (!normalizedKey) continue;
+    if (normalizedCandidates.some((candidate) => normalizedKey.includes(candidate))) {
+      matchedKeys.add(key);
+    }
+  }
+
+  let total = 0;
+  for (const key of matchedKeys) {
+    total += Math.abs(parseAmount(row[key]));
+  }
+  return total;
 }
 
 function sumFeeColumns(row: Record<string, string>, candidates: string[]): number {
@@ -119,7 +182,7 @@ function parseShopeeIncomeWorkbook(content: ArrayBuffer): IncomeTransaction[] {
     if (!orderId) continue;
 
     const releaseDate = findColumn(row, ["waktu release", "release time", "tanggal release", "release date"]);
-    const amount = sumAbsColumns(row, [
+    const amount = sumAbsColumnsByHeaderMatch(row, [
       "biaya layanan gratis ongkir xtra",
       "service fee",
       "biaya layanan",
@@ -262,6 +325,7 @@ function parseShopeeIncomeRows(rows: Record<string, string>[]): IncomeTransactio
         "voucher co fund disponsor oleh penjual",
         "cashback koin disponsori penjual",
         "cashback koin co fund disponsori penjual",
+        "promo gratis ongkir dari penjual",
         "seller voucher",
       ]);
 
@@ -298,19 +362,8 @@ function parseShopeeIncomeRows(rows: Record<string, string>[]): IncomeTransactio
 function parseUnifiedMarketplaceIncomeRows(rows: Record<string, string>[]): IncomeTransaction[] {
   return rows
     .map((row): IncomeTransaction | null => {
-      const orderId = findColumn(row, [
-        "order adjustment id",
-        "order/adjustment id",
-        "order id",
-        "no. pesanan",
-        "invoice",
-      ]);
-      if (!orderId) return null;
-
-      const type = normalizeText(findColumn(row, ["type"]));
-      if (type.includes("withdraw") || type.includes("top up") || type.includes("balance")) {
-        return null;
-      }
+      const { include, orderId } = resolveMarketplaceOrderIdentity(row);
+      if (!include || !orderId) return null;
 
       const releaseDate = findColumn(row, [
         "order settled time",
@@ -429,19 +482,8 @@ function parseUnifiedMarketplaceIncomeRows(rows: Record<string, string>[]): Inco
 function parseTokopediaIncomeRows(rows: Record<string, string>[]): IncomeTransaction[] {
   const normalized = rows
     .map((row): IncomeTransaction | null => {
-      const orderId = findColumn(row, [
-        "order adjustment id",
-        "order/adjustment id",
-        "order id",
-        "no invoice",
-        "invoice",
-      ]);
-      if (!orderId) return null;
-
-      const type = normalizeText(findColumn(row, ["type"]));
-      if (type && !type.includes("order") && !type.includes("adjustment")) {
-        return null;
-      }
+      const { include, orderId } = resolveMarketplaceOrderIdentity(row);
+      if (!include || !orderId) return null;
 
       const releaseDate = findColumn(row, [
         "order settled time",

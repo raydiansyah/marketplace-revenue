@@ -1,9 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import AppSidebar from "@/components/AppSidebar";
+import { useMemo, useState } from "react";
+import { CheckCircle2, CircleAlert } from "lucide-react";
+import AuthAreaLayout from "@/components/AuthAreaLayout";
 import { useAppStore } from "@/store/app-store";
 import { MARKETPLACE_LABELS } from "@/lib/types";
+import { useAuth } from "@/lib/auth/auth-context";
+import { useNotification } from "@/lib/notifications/notification-context";
+import { validateStrongPassword } from "@/lib/auth/password-policy";
 
 function PercentInput({
   label,
@@ -18,18 +22,18 @@ function PercentInput({
 }) {
   return (
     <div>
-      <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
+      <label className="block text-xs font-medium text-[var(--text-subtle)] mb-1">{label}</label>
       <div className="relative">
         <input
           type="number"
           value={(value * 100).toFixed(2)}
           onChange={(e) => onChange(parseFloat(e.target.value) / 100 || 0)}
           step="0.01"
-          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm pr-8 focus:outline-none focus:ring-2 focus:ring-slate-300"
+          className="field-input pr-8"
         />
-        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">%</span>
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-subtle)]">%</span>
       </div>
-      {help && <p className="text-xs text-gray-400 mt-0.5">{help}</p>}
+      {help && <p className="text-xs text-[var(--text-subtle)] mt-0.5">{help}</p>}
     </div>
   );
 }
@@ -47,17 +51,17 @@ function RpInput({
 }) {
   return (
     <div>
-      <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
+      <label className="block text-xs font-medium text-[var(--text-subtle)] mb-1">{label}</label>
       <div className="relative">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">Rp</span>
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-subtle)]">Rp</span>
         <input
           type="number"
           value={value}
           onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm pl-9 focus:outline-none focus:ring-2 focus:ring-slate-300"
+          className="field-input pl-9"
         />
       </div>
-      {help && <p className="text-xs text-gray-400 mt-0.5">{help}</p>}
+      {help && <p className="text-xs text-[var(--text-subtle)] mt-0.5">{help}</p>}
     </div>
   );
 }
@@ -77,8 +81,10 @@ function Toggle({
     <div className="flex items-start gap-3">
       <button
         onClick={() => onChange(!value)}
-        className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 mt-0.5 ${
-          value ? "bg-slate-800" : "bg-gray-200"
+        className={`relative w-10 h-5 rounded-full transition-all flex-shrink-0 mt-0.5 border ${
+          value
+            ? "bg-[var(--brand)] border-[var(--brand)]"
+            : "bg-[var(--surface-soft)] border-[var(--border-subtle)] hover:bg-[var(--hover-strong)]"
         }`}
       >
         <span
@@ -88,8 +94,8 @@ function Toggle({
         />
       </button>
       <div>
-        <p className="text-xs font-medium text-slate-600">{label}</p>
-        {help && <p className="text-xs text-gray-400">{help}</p>}
+        <p className="text-xs font-medium text-[var(--foreground)]">{label}</p>
+        {help && <p className="text-xs text-[var(--text-subtle)]">{help}</p>}
       </div>
     </div>
   );
@@ -309,6 +315,154 @@ const SETTINGS_COMPONENTS: Record<string, React.FC> = {
   lazada: LazadaSettings,
 };
 
+function PasswordChecklistItem({
+  ok,
+  label,
+}: {
+  ok: boolean;
+  label: string;
+}) {
+  return (
+    <div className={`flex items-center gap-2 text-xs ${ok ? "text-emerald-700" : "text-slate-500"}`}>
+      <CheckCircle2 className={`w-3.5 h-3.5 ${ok ? "text-emerald-600" : "text-slate-300"}`} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function ProfileSecuritySettings() {
+  const { user } = useAuth();
+  const { notify } = useNotification();
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const strength = useMemo(() => validateStrongPassword(newPassword), [newPassword]);
+
+  const submitPasswordChange = async () => {
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      notify("warning", "Semua field password wajib diisi.");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      notify("error", "Konfirmasi password tidak cocok.");
+      return;
+    }
+
+    if (!strength.isValid) {
+      notify("warning", "Password baru belum memenuhi kriteria kuat.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const res = await fetch("/api/auth/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword, confirmPassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const details = Array.isArray(data?.details) ? ` ${data.details.join(" ")}` : "";
+        notify("error", `${data?.error ?? "Gagal memperbarui password."}${details}`);
+        return;
+      }
+
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      notify("success", "Password berhasil diperbarui.");
+    } catch {
+      notify("warning", "Terjadi kesalahan saat update password.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="panel-card mt-6">
+      <div className="p-5 border-b border-[var(--border-subtle)]">
+        <h2 className="text-base font-semibold text-slate-800">Profil & Keamanan</h2>
+        <p className="text-xs text-slate-500 mt-1">
+          Kelola identitas akun dan ubah password dengan standar strong password.
+        </p>
+      </div>
+
+      <div className="p-5 space-y-5">
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div className="panel-card-soft px-3 py-2.5">
+            <p className="text-xs text-slate-500">Email</p>
+            <p className="text-sm font-medium text-slate-800">{user?.email ?? "-"}</p>
+          </div>
+          <div className="panel-card-soft px-3 py-2.5">
+            <p className="text-xs text-slate-500">Role</p>
+            <p className="text-sm font-medium text-slate-800">{user?.role ?? "-"}</p>
+          </div>
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2">
+            <label className="block text-xs font-medium text-slate-600 mb-1">Password Lama</label>
+            <input
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              className="field-input"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Password Baru</label>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="field-input"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Konfirmasi Password Baru</label>
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              className="field-input"
+            />
+          </div>
+        </div>
+
+        <div className="panel-card-soft p-3">
+          <div className="flex items-center gap-2 mb-2">
+            <CircleAlert className="w-4 h-4 text-slate-500" />
+            <p className="text-xs font-medium text-slate-700">Kriteria Strong Password</p>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-y-1.5">
+            <PasswordChecklistItem ok={strength.checks.minLength} label="Minimal 12 karakter" />
+            <PasswordChecklistItem ok={strength.checks.maxLength} label="Maksimal 72 byte" />
+            <PasswordChecklistItem ok={strength.checks.hasLower} label="Ada huruf kecil (a-z)" />
+            <PasswordChecklistItem ok={strength.checks.hasUpper} label="Ada huruf besar (A-Z)" />
+            <PasswordChecklistItem ok={strength.checks.hasNumber} label="Ada angka (0-9)" />
+            <PasswordChecklistItem ok={strength.checks.hasSymbol} label="Ada simbol (!@#$...)" />
+            <PasswordChecklistItem ok={strength.checks.notCommon} label="Bukan password umum" />
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={submitPasswordChange}
+            disabled={saving}
+            className="px-4 py-2 rounded-lg action-primary text-sm font-semibold disabled:opacity-50"
+          >
+            {saving ? "Menyimpan..." : "Update Password"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const [active, setActive] = useState<"shopee" | "tokopedia" | "lazada">("shopee");
 
@@ -320,26 +474,25 @@ export default function SettingsPage() {
   const ActiveComponent = SETTINGS_COMPONENTS[active];
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
-      <AppSidebar />
-      <div className="flex-1 max-w-2xl w-full mx-auto px-4 py-8">
+    <AuthAreaLayout contentClassName="px-4 py-8">
+      <div className="max-w-2xl w-full mx-auto">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-800">Konfigurasi Fee Marketplace</h1>
-          <p className="text-slate-500 mt-1 text-sm">
+          <h1 className="text-2xl font-bold text-[var(--foreground)]">Konfigurasi Fee Marketplace</h1>
+          <p className="text-[var(--text-subtle)] mt-1 text-sm">
             Atur persentase biaya sesuai kondisi seller kamu. Marketplace sering mengubah fee — perbarui di sini jika ada perubahan.
           </p>
         </div>
 
-        <div className="bg-white rounded-xl border border-gray-200">
-          <div className="flex border-b border-gray-100">
+        <div className="panel-card">
+          <div className="flex border-b border-[var(--border-subtle)]">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActive(tab.id)}
                 className={`flex-1 py-3 text-sm font-medium transition-colors ${
                   active === tab.id
-                    ? "text-slate-800 border-b-2 border-slate-800"
-                    : "text-slate-400 hover:text-slate-600"
+                    ? "text-[var(--foreground)] border-b-2 border-[var(--foreground)]"
+                    : "text-[var(--text-subtle)] hover:text-[var(--foreground)]"
                 }`}
               >
                 {tab.label}
@@ -351,10 +504,12 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <p className="text-xs text-slate-400 mt-4 text-center">
-          Pengaturan disimpan otomatis ke browser kamu
+        <p className="text-xs text-[var(--text-subtle)] mt-4 text-center">
+          Pengaturan disimpan otomatis ke akun kamu
         </p>
+
+        <ProfileSecuritySettings />
       </div>
-    </div>
+    </AuthAreaLayout>
   );
 }

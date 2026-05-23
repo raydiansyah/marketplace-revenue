@@ -15,70 +15,7 @@ import {
   DEFAULT_TOKOPEDIA_CONFIG,
   DEFAULT_LAZADA_CONFIG,
 } from "../defaults";
-
-// ============================================================
-// HPP LOOKUP
-// ============================================================
-
-function lookupHpp(sku: string, productName: string, hppEntries: HppEntry[]): number {
-  if (!hppEntries.length) return 0;
-
-  const normalizeSku = (value: string) =>
-    String(value ?? "")
-      .trim()
-      .replace(/^'+/, "")
-      .replace(/\.0+$/, "")
-      .replace(/[^a-zA-Z0-9]+/g, "")
-      .toLowerCase();
-
-  const normalizeName = (value: string) =>
-    String(value ?? "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, " ")
-      .trim();
-
-  const normalizedSku = normalizeSku(sku);
-  const normalizedProductName = normalizeName(productName);
-
-  // Cari exact match SKU dulu
-  const bySkU = normalizedSku
-    ? hppEntries.find((e) => normalizeSku(e.sku) === normalizedSku && e.cost > 0)
-    : undefined;
-  if (bySkU) return bySkU.cost;
-
-  if (!normalizedProductName) return 0;
-
-  const scored = hppEntries
-    .map((entry) => {
-      const entryName = normalizeName(entry.productName);
-      if (!entryName) return { entry, score: 0 };
-      if (entryName === normalizedProductName) return { entry, score: 100 };
-      if (normalizedProductName.includes(entryName) || entryName.includes(normalizedProductName)) {
-        return { entry, score: 80 };
-      }
-      const a = new Set(normalizedProductName.split(" ").filter(Boolean));
-      const b = new Set(entryName.split(" ").filter(Boolean));
-      const overlap = [...a].filter((token) => b.has(token)).length;
-      return { entry, score: overlap >= 2 ? overlap * 10 : 0 };
-    })
-    .filter((item) => item.score > 0)
-    .sort((x, y) => y.score - x.score);
-
-  const withCost = scored.find((item) => item.entry.cost > 0);
-  if (!withCost) return scored[0]?.entry.cost ?? 0;
-
-  if (normalizedSku) {
-    const distinctCosts = new Set(
-      scored
-        .map((item) => item.entry.cost)
-        .filter((cost) => cost > 0)
-    );
-    return distinctCosts.size === 1 ? withCost.entry.cost : 0;
-  }
-
-  return withCost.entry.cost;
-
-}
+import { lookupHpp } from "./hpp-lookup";
 
 // ============================================================
 // SHOPEE CALCULATOR
@@ -323,5 +260,6 @@ export function generateReport(
     totalPlatformFees: marketplaces.reduce((s, m) => s + m.totalPlatformFees, 0),
     totalNetProfit: marketplaces.reduce((s, m) => s + m.totalNetProfit, 0),
     orders: calculatedOrders,
+    hppSnapshot: hppEntries.length > 0 ? [...hppEntries] : undefined,
   };
 }

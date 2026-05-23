@@ -1,3 +1,11 @@
+/**
+ * Module: AppSidebar
+ * Purpose: Primary navigation sidebar — desktop persistent, mobile overlay
+ * Used by: AuthAreaLayout
+ * Dependencies: useAuth, next/navigation, lucide-react, ThemeToggle
+ * Public functions: AppSidebar (default export)
+ * Side effects: Reads auth state; triggers logout on button click
+ */
 "use client";
 
 import Link from "next/link";
@@ -16,8 +24,13 @@ import {
   ChevronRight,
   PackageSearch,
   Database,
+  FilePlus,
+  Megaphone,
+  Banknote,
+  Sparkles,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth/auth-context";
+import ThemeToggle from "@/components/ThemeToggle";
 
 type NavItem = {
   label: string;
@@ -46,10 +59,28 @@ const mainNavItems: NavItem[] = [
     match: (pathname) => pathname === "/data-bank",
   },
   {
+    label: "Iklan & ROAS",
+    href: "/ads",
+    icon: Megaphone,
+    match: (pathname) => pathname === "/ads",
+  },
+  {
+    label: "Kas Keuangan",
+    href: "/cashflow",
+    icon: Banknote,
+    match: (pathname) => pathname === "/cashflow",
+  },
+  {
     label: "Manajemen HPP",
     href: "/hpp",
     icon: PackageSearch,
     match: (pathname) => pathname === "/hpp",
+  },
+  {
+    label: "Buat Laporan",
+    href: "/reports/new",
+    icon: FilePlus,
+    match: (pathname) => pathname === "/reports/new",
   },
   {
     label: "Laporan Tersimpan",
@@ -146,18 +177,32 @@ export default function AppSidebar({
         ))}
 
         {user.role === "superadmin" && (
-          <Link
-            href="/admin/users"
-            className={`w-full text-left px-3 py-2.5 rounded-xl inline-flex items-center gap-2.5 transition-all ${
-              isAdminActive
-                ? "bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-text)] border border-[var(--sidebar-active-border)]"
-                : "text-[var(--sidebar-text)] hover:bg-[var(--surface-soft)]"
-            }`}
-            onClick={onClose}
-          >
-            <Users className="w-4 h-4 shrink-0" />
-            <span>Manajemen User</span>
-          </Link>
+          <>
+            <Link
+              href="/admin/users"
+              className={`w-full text-left px-3 py-2.5 rounded-xl inline-flex items-center gap-2.5 transition-all ${
+                pathname === "/admin/users"
+                  ? "bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-text)] border border-[var(--sidebar-active-border)]"
+                  : "text-[var(--sidebar-text)] hover:bg-[var(--surface-soft)]"
+              }`}
+              onClick={onClose}
+            >
+              <Users className="w-4 h-4 shrink-0" />
+              <span>Manajemen User</span>
+            </Link>
+            <Link
+              href="/admin/ai"
+              className={`w-full text-left px-3 py-2.5 rounded-xl inline-flex items-center gap-2.5 transition-all ${
+                pathname === "/admin/ai"
+                  ? "bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-text)] border border-[var(--sidebar-active-border)]"
+                  : "text-[var(--sidebar-text)] hover:bg-[var(--surface-soft)]"
+              }`}
+              onClick={onClose}
+            >
+              <Sparkles className="w-4 h-4 shrink-0" />
+              <span>Manajemen AI</span>
+            </Link>
+          </>
         )}
       </nav>
 
@@ -191,6 +236,10 @@ export default function AppSidebar({
               {roleLabel[user.role] ?? user.role}
             </span>
           </div>
+        </div>
+        <div className="flex items-center justify-between px-1">
+          <span className="text-[11px] text-[var(--sidebar-muted)]">Tema</span>
+          <ThemeToggle compact />
         </div>
         <button
           onClick={() => {
