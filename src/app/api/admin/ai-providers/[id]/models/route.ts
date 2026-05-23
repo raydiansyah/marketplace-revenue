@@ -17,6 +17,18 @@ import { eq } from "drizzle-orm";
 // Module-level 1-hour cache: { models, expiresAt }
 const modelsCache = new Map<string, { models: string[]; expiresAt: number }>();
 const CACHE_TTL_MS = 60 * 60 * 1000;
+const FETCH_TIMEOUT_MS = 15_000;
+
+/** Safely parse JSON — returns null instead of throwing on invalid body. */
+async function safeJson(res: Response): Promise<unknown> {
+  const text = await res.text().catch(() => "");
+  if (!text.trim()) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
 
 export async function GET(
   _req: NextRequest,
@@ -48,48 +60,52 @@ export async function GET(
     try {
       apiKey = decryptSecret(row.encryptedApiKey);
     } catch {
-      return NextResponse.json({ error: "Gagal mendekripsi API key" }, { status: 500 });
+      return NextResponse.json({ error: "Gagal mendekripsi API key provider" }, { status: 500 });
     }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
     let models: string[] = [];
 
-    if (row.provider === "anthropic") {
-      const res = await fetch("https://api.anthropic.com/v1/models", {
-        headers: {
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-        },
-      });
-      if (!res.ok) {
-        return NextResponse.json(
-          { error: `Anthropic API error: ${res.status}` },
-          { status: 502 }
-        );
+    try {
+      if (row.provider === "anthropic") {
+        const res = await fetch("https://api.anthropic.com/v1/models", {
+          signal: controller.signal,
+          headers: {
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+        });
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          return NextResponse.json(
+            { error: `Anthropic API error ${res.status}: ${body.slice(0, 200)}` },
+            { status: 502 }
+          );
+        }
+        const data = await safeJson(res) as { data?: Array<{ id: string }> } | null;
+        models = (data?.data ?? []).map((m) => m.id).filter(Boolean);
+      } else {
+        // openai-compatible: strip trailing slash from baseUrl
+        const rawBase = (row.baseUrl ?? "https://api.openai.com").replace(/\/+$/, "");
+        const res = await fetch(`${rawBase}/v1/models`, {
+          signal: controller.signal,
+          headers: { Authorization: `Bearer ${apiKey}` },
+        });
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          return NextResponse.json(
+            { error: `Provider API error ${res.status}: ${body.slice(0, 200)}` },
+            { status: 502 }
+          );
+        }
+        const data = await safeJson(res) as { data?: Array<{ id: string }> } | null;
+        // Return ALL models — caller filters/searches in UI
+        models = (data?.data ?? []).map((m) => m.id).filter(Boolean);
       }
-      const data = (await res.json()) as { data?: Array<{ id: string }> };
-      models = (data.data ?? []).map((m) => m.id);
-    } else {
-      // openai-compatible
-      const baseUrl = row.baseUrl ?? "https://api.openai.com";
-      const res = await fetch(`${baseUrl}/v1/models`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      });
-      if (!res.ok) {
-        return NextResponse.json(
-          { error: `OpenAI API error: ${res.status}` },
-          { status: 502 }
-        );
-      }
-      const data = (await res.json()) as { data?: Array<{ id: string }> };
-      // Filter to text/chat models only
-      models = (data.data ?? [])
-        .map((m) => m.id)
-        .filter(
-          (modelId) =>
-            modelId.startsWith("gpt") ||
-            modelId.startsWith("o1") ||
-            modelId.startsWith("o3")
-        );
+    } finally {
+      clearTimeout(timeout);
     }
 
     modelsCache.set(id, { models, expiresAt: Date.now() + CACHE_TTL_MS });
@@ -97,7 +113,12 @@ export async function GET(
     return NextResponse.json({ models });
   } catch (e) {
     if (e instanceof Response) return e;
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    const isAbort = msg.includes("abort") || msg.includes("AbortError");
     console.error("[GET /api/admin/ai-providers/[id]/models]", e);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: isAbort ? "Request timeout — provider API tidak merespons dalam 15 detik" : `Server error: ${msg}` },
+      { status: 500 }
+    );
   }
 }

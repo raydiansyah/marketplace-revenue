@@ -12,7 +12,6 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { verifyAccessToken } from "@/lib/auth/jwt";
 import { ACCESS_COOKIE, LEGACY_COOKIE } from "@/lib/auth/cookies";
-import { isCanonicalSuperadminEmail } from "@/lib/auth/constants";
 
 const PUBLIC_PATHS = ["/", "/login", "/forgot-password", "/reset-password"];
 const PUBLIC_API_PATHS = [
@@ -85,12 +84,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Superadmin-only paths
+  // Superadmin-only paths — role from DB is authoritative; no email whitelist
   if (SUPERADMIN_PATHS.some((p) => pathname.startsWith(p))) {
-    if (
-      payload.role !== "superadmin" ||
-      !isCanonicalSuperadminEmail(payload.email)
-    ) {
+    if (payload.role !== "superadmin") {
       if (pathname.startsWith("/api/")) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
