@@ -148,7 +148,7 @@ export interface OrderFeeBreakdown {
 export interface CalculatedOrder extends RawOrder {
   hpp: number;
   fees: OrderFeeBreakdown;
-  /** Revenue = actualPrice * qty */
+  /** Revenue = actualPrice * qty (qty setelah return dikurangi) */
   revenue: number;
   /** Gross profit = revenue - hpp */
   grossProfit: number;
@@ -156,6 +156,35 @@ export interface CalculatedOrder extends RawOrder {
   netProfit: number;
   grossMargin: number;
   netMargin: number;
+  /**
+   * Jumlah unit yang dikembalikan (return/refund).
+   * Diisi hanya jika ada data return (dari file return terpisah atau embedded qty di file pesanan).
+   */
+  returnQty?: number;
+  /**
+   * Estimasi revenue yang hilang akibat return (returnQty × actualPrice per unit).
+   * Berguna untuk analisa dampak retur ke omzet.
+   */
+  returnRevenue?: number;
+  /**
+   * HPP yang "keluar sia-sia" akibat barang sudah dikirim tapi dikembalikan.
+   * = lookupHpp(sku) × returnQty
+   * Ini adalah biaya riil yang ditanggung seller untuk unit yang di-return.
+   */
+  returnHpp?: number;
+  /** Optional breakdown line per SKU untuk order multi-SKU */
+  lineItems?: Array<{
+    sku: string;
+    productName: string;
+    qty: number;
+    revenue: number;
+    hpp: number;
+    platformFee: number;
+    grossProfit: number;
+    netProfit: number;
+    grossMargin: number;
+    netMargin: number;
+  }>;
 }
 
 // ============================================================
@@ -193,6 +222,12 @@ export interface RevenueReport {
   totalPlatformFees: number;
   totalNetProfit: number;
   orders: CalculatedOrder[];
+  /** Snapshot HPP entries yang digunakan saat report di-generate (audit trail). */
+  hppSnapshot?: HppEntry[];
+  /** ID toko (stores table) yang menghasilkan report ini. */
+  storeId?: string;
+  /** Periode bulan laporan — diisi saat report berasal dari monthly_uploads. */
+  reportPeriod?: { year: number; month: number };
 }
 
 export interface SavedStoreReport {
@@ -202,6 +237,12 @@ export interface SavedStoreReport {
   label: string;
   createdAt: string;
   report: RevenueReport;
+  /** FK ke stores.id — diisi untuk report yang berasal dari monthly_uploads. */
+  storeId?: string;
+  /** Tahun periode laporan. */
+  periodYear?: number;
+  /** Bulan periode laporan (1-12). */
+  periodMonth?: number;
 }
 
 // ============================================================
@@ -254,10 +295,39 @@ export interface IncomeFile {
   label?: string;
 }
 
+export interface ReturnOrderTransaction {
+  returnOrderId: string;
+  orderId: string;
+  skuId: string;
+  sellerSku: string;
+  productName: string;
+  skuName: string;
+  returnType: string;
+  timeRequested: string;
+  returnReason: string;
+  returnUnitPrice: number;
+  returnQuantity: number;
+  returnStatus: string;
+  returnSubStatus: string;
+  refundTime: string;
+  compensationAmount: number;
+  buyerNote: string;
+  rawData?: Record<string, string>;
+}
+
+export interface ReturnOrderFile {
+  fileName: string;
+  transactions: ReturnOrderTransaction[];
+  uploadedAt: string;
+  /** Label bulan untuk UI, misal "Maret 2025" */
+  label?: string;
+}
+
 /**
  * Set upload per marketplace:
  * - orderFiles: 1-2 file Pesanan Selesai (bulan sebelumnya + bulan ini)
  * - incomeFile: 1 file Transaksi Pendapatan (bulan yang dihitung)
+ * - returnOrderFile: 1 file Pesanan Retur (opsional, TikTok/Tokopedia)
  * - canceledOrderFile: 1 file Pesanan Cancel (opsional)
  * - failedDeliveryFile: 1 file Pesanan Failed Delivery (khusus Shopee, opsional)
  */
@@ -267,6 +337,8 @@ export interface MarketplaceUploadSet {
   orderFiles: OrderFile[];
   /** Transaksi Pendapatan — 1 file bulan yang dihitung */
   incomeFile: IncomeFile | null;
+  /** Pesanan Retur — opsional (khusus TikTok/Tokopedia) */
+  returnOrderFile: ReturnOrderFile | null;
   /** Pesanan Cancel — opsional */
   canceledOrderFile: OrderFile | null;
   /** Pesanan Failed Delivery — khusus Shopee, opsional */
@@ -290,4 +362,53 @@ export interface AppState {
   hppEntries: HppEntry[];
   configs: Partial<Record<MarketplaceId, MarketplaceConfig["config"]>>;
   report: RevenueReport | null;
+}
+
+// ============================================================
+// STORES & MONTHLY UPLOADS (multi-toko)
+// ============================================================
+
+export type FileType =
+  | "order"
+  | "income"
+  | "return"
+  | "cancel"
+  | "failed"
+  | "ads"
+  | "cashflow";
+
+export interface StoreSummary {
+  id: string;
+  userId: string;
+  marketplace: MarketplaceId;
+  storeName: string;
+  externalShopId?: string;
+  isActive: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** Metadata-only row dari monthly_uploads (tanpa parsedJson). */
+export interface MonthlyUploadRecord {
+  id: string;
+  userId: string;
+  storeId: string;
+  marketplace: MarketplaceId;
+  periodYear: number;
+  periodMonth: number;
+  fileType: FileType;
+  fileName: string;
+  rawRowCount: number;
+  checksumSha256: string;
+  uploadedAt: Date;
+}
+
+/** Full row dari monthly_uploads termasuk parsedJson. */
+export interface MonthlyUploadDetail extends MonthlyUploadRecord {
+  parsedJson: unknown[];
+}
+
+/** Shape untuk INSERT ke monthly_uploads. */
+export interface MonthlyUploadInsert extends MonthlyUploadRecord {
+  parsedJson: unknown[];
 }

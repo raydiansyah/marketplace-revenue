@@ -1,56 +1,102 @@
+/**
+ * Module: Upload Page (2-step flow)
+ * Purpose: Step 1 — select marketplace + store + period. Step 2 — drop files to /api/monthly-uploads.
+ * Route: /upload
+ * Used by: sellers uploading marketplace export files per toko per period
+ * Dependencies: StorePicker, MonthPicker, /api/monthly-uploads, /api/stores
+ * Public functions: UploadPage (default export)
+ * Side effects: POST /api/monthly-uploads per file drop; reads /api/stores
+ */
+
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import {
-  Upload, CheckCircle, X, AlertCircle, Plus, Trash2,
-  ChevronDown, ChevronUp, FileText, Receipt,
+  Upload, CheckCircle, X, AlertCircle, FileText, Receipt,
+  ShoppingBag, RotateCcw, TruckIcon, ArrowRight, ArrowLeft,
+  Database,
 } from "lucide-react";
-import AppSidebar from "@/components/AppSidebar";
-import { cn, formatRupiah } from "@/lib/utils";
-import { useAppStore } from "@/store/app-store";
-import { parseShopeeFile } from "@/lib/parsers/shopee";
-import { parseTokopediaFile } from "@/lib/parsers/tokopedia";
-import { parseLazadaFile } from "@/lib/parsers/lazada";
-import { inspectIncomeWorkbook, parseIncomeFile } from "@/lib/parsers/income";
-import { parseProductMasterFileWithMeta } from "@/lib/parsers/productMaster";
-import { generateReportFromSets } from "@/lib/reconcile";
-import { validateUploadFileOrThrow } from "@/lib/validation/uploadValidator";
-import type { MarketplaceId, MarketplaceUploadSet, HppEntry } from "@/lib/types";
-import { MARKETPLACE_LABELS, MARKETPLACE_COLORS } from "@/lib/types";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import AuthAreaLayout from "@/components/AuthAreaLayout";
+import StorePicker from "@/components/StorePicker";
+import MonthPicker, { parseYearMonth } from "@/components/MonthPicker";
+import { cn } from "@/lib/utils";
+import type { MarketplaceId, FileType } from "@/lib/types";
+import { MARKETPLACE_LABELS, MARKETPLACE_COLORS } from "@/lib/types";
+
+// ──────────────────────────────────────────────────────────────
+// Constants
+// ──────────────────────────────────────────────────────────────
 
 const MARKETPLACES: MarketplaceId[] = ["shopee", "tokopedia", "lazada"];
 
+const FILE_ACCEPT = {
+  "text/csv": [".csv"],
+  "application/vnd.ms-excel": [".xls"],
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+};
+
 // ──────────────────────────────────────────────────────────────
-// Drop Zone Component
+// Types local to this page
+// ──────────────────────────────────────────────────────────────
+
+type UploadStatus = "idle" | "uploading" | "success" | "error";
+
+interface SlotState {
+  status: UploadStatus;
+  fileName?: string;
+  rowCount?: number;
+  error?: string;
+  uploadId?: string;
+}
+
+interface UploadSlots {
+  order_prev: SlotState;
+  order_curr: SlotState;
+  income: SlotState;
+  return: SlotState;
+  cancel: SlotState;
+  failed: SlotState;
+}
+
+const EMPTY_SLOTS: UploadSlots = {
+  order_prev: { status: "idle" },
+  order_curr: { status: "idle" },
+  income: { status: "idle" },
+  return: { status: "idle" },
+  cancel: { status: "idle" },
+  failed: { status: "idle" },
+};
+
+type SlotKey = keyof UploadSlots;
+
+// ──────────────────────────────────────────────────────────────
+// Drop Zone Component (kept from original, adapted for server upload)
 // ──────────────────────────────────────────────────────────────
 
 interface DropZoneProps {
   onFile: (file: File) => Promise<void>;
   label: string;
   hint: string;
-  accept?: Record<string, string[]>;
   disabled?: boolean;
+  uploading?: boolean;
 }
 
-function DropZone({ onFile, label, hint, disabled }: DropZoneProps) {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+function DropZone({ onFile, label, hint, disabled, uploading }: DropZoneProps) {
+  const [localError, setLocalError] = useState<string | null>(null);
 
   const onDrop = useCallback(
     async (files: File[]) => {
       const file = files[0];
       if (!file) return;
-      setError(null);
-      setLoading(true);
+      setLocalError(null);
       try {
         await onFile(file);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        setError(msg || "Gagal membaca file.");
-      } finally {
-        setLoading(false);
+        setLocalError(msg || "Gagal mengunggah file.");
       }
     },
     [onFile]
@@ -58,13 +104,9 @@ function DropZone({ onFile, label, hint, disabled }: DropZoneProps) {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: {
-      "text/csv": [".csv"],
-      "application/vnd.ms-excel": [".xls"],
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
-    },
+    accept: FILE_ACCEPT,
     multiple: false,
-    disabled: disabled || loading,
+    disabled: disabled || uploading,
   });
 
   return (
@@ -73,15 +115,17 @@ function DropZone({ onFile, label, hint, disabled }: DropZoneProps) {
         {...getRootProps()}
         className={cn(
           "border-2 border-dashed rounded-xl px-4 py-3 text-center cursor-pointer transition-all",
-          isDragActive ? "border-blue-400 bg-blue-50 shadow-sm" : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50",
-          disabled && "opacity-40 cursor-not-allowed"
+          isDragActive
+            ? "border-blue-400 bg-blue-50"
+            : "border-[var(--border-subtle)] bg-[var(--surface)] hover:border-slate-300 hover:bg-[var(--surface-muted)]",
+          (disabled || uploading) && "opacity-40 cursor-not-allowed"
         )}
       >
         <input {...getInputProps()} />
-        {loading ? (
+        {uploading ? (
           <div className="flex items-center justify-center gap-2 text-slate-500 text-sm">
             <div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
-            Memproses...
+            Mengunggah...
           </div>
         ) : (
           <div className="flex items-center gap-2 justify-center">
@@ -91,10 +135,10 @@ function DropZone({ onFile, label, hint, disabled }: DropZoneProps) {
           </div>
         )}
       </div>
-      {error && (
+      {localError && (
         <div className="mt-1 flex items-center gap-1 text-red-500 text-xs">
           <AlertCircle className="w-3 h-3" />
-          {error}
+          {localError}
         </div>
       )}
     </div>
@@ -102,561 +146,450 @@ function DropZone({ onFile, label, hint, disabled }: DropZoneProps) {
 }
 
 // ──────────────────────────────────────────────────────────────
-// Marketplace Upload Card
+// Uploaded File Row Component
 // ──────────────────────────────────────────────────────────────
 
-function MarketplaceCard({ marketplace }: { marketplace: MarketplaceId }) {
-  const {
-    uploadSets,
-    setOrderFileAt,
-    setCanceledOrderFile,
-    setFailedDeliveryFile,
-    setIncomeFile,
-  } = useAppStore();
-  const [open, setOpen] = useState(true);
-
-  const uploadSet = uploadSets[marketplace];
-  const color = MARKETPLACE_COLORS[marketplace];
-  const label = MARKETPLACE_LABELS[marketplace];
-  const orderFiles = uploadSet?.orderFiles ?? [];
-  const canceledOrderFile = uploadSet?.canceledOrderFile ?? null;
-  const failedDeliveryFile = uploadSet?.failedDeliveryFile ?? null;
-  const incomeFile = uploadSet?.incomeFile ?? null;
-
-  const totalOrders = orderFiles.reduce((s, f) => s + f.rawOrders.length, 0);
-  const totalCanceledOrders = canceledOrderFile?.rawOrders.length ?? 0;
-  const totalFailedDeliveryOrders = failedDeliveryFile?.rawOrders.length ?? 0;
-  const totalIncome = incomeFile?.transactions.length ?? 0;
-  const previousMonthOrderFile =
-    orderFiles.find((f) => f.label === "previous-month") ??
-    orderFiles.find((f) => f.label === undefined) ??
-    null;
-  const currentMonthOrderFile =
-    orderFiles.find((f) => f.label === "current-month") ??
-    null;
-
-  async function handleOrderFile(file: File, slot: 0 | 1) {
-    const fileName = file.name.toLowerCase();
-    const isExcel = fileName.endsWith(".xlsx") || fileName.endsWith(".xls");
-    const content = isExcel ? await file.arrayBuffer() : await file.text();
-    validateUploadFileOrThrow({
-      marketplace,
-      role: "orders",
-      fileName: file.name,
-      content,
-    });
-
-    let rawOrders;
-    if (marketplace === "shopee") {
-      rawOrders = parseShopeeFile(content);
-    } else if (marketplace === "tokopedia") {
-      rawOrders = parseTokopediaFile(content);
-    } else {
-      rawOrders = parseLazadaFile(content);
-    }
-    if (rawOrders.length === 0) throw new Error("0 pesanan terbaca — pastikan file adalah export Pesanan Selesai dari Seller Center, bukan laporan lainnya");
-    setOrderFileAt(marketplace, slot, {
-      fileName: file.name,
-      rawOrders,
-      uploadedAt: new Date().toISOString(),
-    });
-  }
-
-  async function handleIncomeFile(file: File) {
-    const fileName = file.name.toLowerCase();
-    const isExcel = fileName.endsWith(".xlsx") || fileName.endsWith(".xls");
-    const content = isExcel ? await file.arrayBuffer() : await file.text();
-    validateUploadFileOrThrow({
-      marketplace,
-      role: "income",
-      fileName: file.name,
-      content,
-    });
-
-    const transactions = parseIncomeFile(content, marketplace);
-    if (transactions.length === 0) {
-      if (isExcel && content instanceof ArrayBuffer && marketplace === "lazada") {
-        const debugInfo = inspectIncomeWorkbook(content);
-        throw new Error(
-          `0 transaksi terbaca. Debug Lazada: ${debugInfo}`
-        );
-      }
-      throw new Error("0 transaksi terbaca — pastikan file adalah export Transaksi Pendapatan / Income dari Seller Center");
-    }
-    setIncomeFile(marketplace, {
-      fileName: file.name,
-      transactions,
-      uploadedAt: new Date().toISOString(),
-    });
-  }
-
-  async function handleCanceledOrderFile(file: File) {
-    const fileName = file.name.toLowerCase();
-    const isExcel = fileName.endsWith(".xlsx") || fileName.endsWith(".xls");
-    const content = isExcel ? await file.arrayBuffer() : await file.text();
-    validateUploadFileOrThrow({
-      marketplace,
-      role: "canceled-orders",
-      fileName: file.name,
-      content,
-    });
-
-    let rawOrders;
-    if (marketplace === "shopee") {
-      rawOrders = parseShopeeFile(content);
-    } else if (marketplace === "tokopedia") {
-      rawOrders = parseTokopediaFile(content);
-    } else {
-      rawOrders = parseLazadaFile(content);
-    }
-    if (rawOrders.length === 0) throw new Error("0 pesanan cancel terbaca — pastikan file adalah export Pesanan Cancel dari Seller Center");
-    setCanceledOrderFile(marketplace, {
-      fileName: file.name,
-      rawOrders,
-      uploadedAt: new Date().toISOString(),
-      label: "cancelled-orders",
-    });
-  }
-
-  async function handleFailedDeliveryFile(file: File) {
-    const fileName = file.name.toLowerCase();
-    const isExcel = fileName.endsWith(".xlsx") || fileName.endsWith(".xls");
-    const content = isExcel ? await file.arrayBuffer() : await file.text();
-    validateUploadFileOrThrow({
-      marketplace,
-      role: "failed-delivery",
-      fileName: file.name,
-      content,
-    });
-
-    const rawOrders = parseShopeeFile(content);
-    if (rawOrders.length === 0) {
-      throw new Error("0 pesanan failed delivery terbaca — pastikan file adalah export Failed Delivery dari Seller Center");
-    }
-
-    setFailedDeliveryFile(marketplace, {
-      fileName: file.name,
-      rawOrders,
-      uploadedAt: new Date().toISOString(),
-      label: "failed-delivery-orders",
-    });
-  }
-
-  const hasData =
-    totalOrders > 0 ||
-    totalIncome > 0 ||
-    totalCanceledOrders > 0 ||
-    totalFailedDeliveryOrders > 0;
-
+function UploadedFileRow({
+  fileName,
+  count,
+  countLabel,
+  accentColor,
+  onRemove,
+}: {
+  fileName: string;
+  count: number;
+  countLabel: string;
+  accentColor: string;
+  onRemove: () => void;
+}) {
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-      {/* Header */}
+    <div
+      className="flex items-center justify-between rounded-lg px-3 py-2 border"
+      style={{
+        borderColor: `${accentColor}40`,
+        backgroundColor: `${accentColor}12`,
+      }}
+    >
+      <div className="flex items-center gap-2 min-w-0">
+        <CheckCircle className="w-3.5 h-3.5 shrink-0" style={{ color: accentColor }} />
+        <span className="text-xs text-[var(--foreground)] font-medium truncate max-w-[200px]">{fileName}</span>
+        <span
+          className="text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0"
+          style={{ color: accentColor, backgroundColor: `${accentColor}20` }}
+        >
+          {count} {countLabel}
+        </span>
+      </div>
       <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors"
+        type="button"
+        onClick={onRemove}
+        className="text-[var(--text-subtle)] hover:text-red-400 ml-2 shrink-0 transition-colors"
       >
-        <div className="flex items-center gap-3">
-          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
-          <span className="font-semibold text-slate-800">{label}</span>
-          {hasData && (
-            <div className="flex items-center gap-2">
-              {totalOrders > 0 && (
-                <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
-                  {totalOrders} pesanan
-                </span>
-              )}
-              {totalCanceledOrders > 0 && (
-                <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
-                  {totalCanceledOrders} cancel
-                </span>
-              )}
-              {totalFailedDeliveryOrders > 0 && (
-                <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
-                  {totalFailedDeliveryOrders} failed delivery
-                </span>
-              )}
-              {totalIncome > 0 && (
-                <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
-                  {totalIncome} transaksi
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-        {open ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+        <X className="w-3.5 h-3.5" />
       </button>
-
-      {open && (
-        <div className="px-4 pb-4 space-y-4 border-t border-slate-100 pt-4">
-
-          {/* Pesanan Selesai */}
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <FileText className="w-3.5 h-3.5 text-blue-500" />
-              <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
-                Pesanan Selesai
-              </span>
-              <span className="text-xs text-slate-400">(download 2 bulan: bulan lalu + bulan ini)</span>
-            </div>
-
-            <div className="space-y-2">
-              {previousMonthOrderFile ? (
-                <div className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle className="w-3.5 h-3.5 text-blue-500" />
-                    <span className="text-xs text-slate-700 font-medium truncate max-w-[200px]">{previousMonthOrderFile.fileName}</span>
-                    <span className="text-xs text-slate-400">{previousMonthOrderFile.rawOrders.length} pesanan</span>
-                  </div>
-                  <button
-                    onClick={() => setOrderFileAt(marketplace, 0, null)}
-                    className="text-slate-300 hover:text-red-400 ml-2"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ) : (
-                <DropZone
-                  onFile={(file) => handleOrderFile(file, 0)}
-                  label="Upload Pesanan Selesai Bulan Lalu"
-                  hint="CSV / XLSX"
-                />
-              )}
-
-              {currentMonthOrderFile ? (
-                <div className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle className="w-3.5 h-3.5 text-blue-500" />
-                    <span className="text-xs text-slate-700 font-medium truncate max-w-[200px]">{currentMonthOrderFile.fileName}</span>
-                    <span className="text-xs text-slate-400">{currentMonthOrderFile.rawOrders.length} pesanan</span>
-                  </div>
-                  <button
-                    onClick={() => setOrderFileAt(marketplace, 1, null)}
-                    className="text-slate-300 hover:text-red-400 ml-2"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ) : (
-                <DropZone
-                  onFile={(file) => handleOrderFile(file, 1)}
-                  label="Upload Pesanan Selesai Bulan Ini"
-                  hint="CSV / XLSX"
-                />
-              )}
-            </div>
-          </div>
-
-          {/* Transaksi Pendapatan */}
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <Receipt className="w-3.5 h-3.5 text-emerald-500" />
-              <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
-                Transaksi Pendapatan
-              </span>
-              <span className="text-xs text-slate-400">(download bulan yang dihitung saja)</span>
-            </div>
-
-            {incomeFile ? (
-              <div className="flex items-center justify-between bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
-                  <span className="text-xs text-slate-700 font-medium truncate max-w-[200px]">{incomeFile.fileName}</span>
-                  <span className="text-xs text-slate-400">{incomeFile.transactions.length} transaksi</span>
-                </div>
-                <button
-                  onClick={() => setIncomeFile(marketplace, null)}
-                  className="text-slate-300 hover:text-red-400 ml-2"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ) : (
-              <DropZone
-                onFile={handleIncomeFile}
-                label="Upload Transaksi Pendapatan"
-                hint="CSV / XLSX — opsional, tapi lebih akurat"
-              />
-            )}
-
-            {!incomeFile && (
-              <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" />
-                Tanpa file ini, biaya platform dihitung dari estimasi config — kurang akurat
-              </p>
-            )}
-          </div>
-
-          {/* Pesanan Cancel (opsional) */}
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <FileText className="w-3.5 h-3.5 text-amber-500" />
-              <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
-                Pesanan Cancel (Opsional)
-              </span>
-            </div>
-
-            {canceledOrderFile ? (
-              <div className="flex items-center justify-between bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-3.5 h-3.5 text-amber-500" />
-                  <span className="text-xs text-slate-700 font-medium truncate max-w-[200px]">{canceledOrderFile.fileName}</span>
-                  <span className="text-xs text-slate-400">{canceledOrderFile.rawOrders.length} pesanan</span>
-                </div>
-                <button
-                  onClick={() => setCanceledOrderFile(marketplace, null)}
-                  className="text-slate-300 hover:text-red-400 ml-2"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ) : (
-              <DropZone
-                onFile={handleCanceledOrderFile}
-                label="Upload Pesanan Cancel"
-                hint="CSV / XLSX (opsional)"
-              />
-            )}
-          </div>
-
-          {marketplace === "shopee" && (
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <FileText className="w-3.5 h-3.5 text-red-500" />
-                <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
-                  Pesanan Failed Delivery (Opsional)
-                </span>
-              </div>
-
-              {failedDeliveryFile ? (
-                <div className="flex items-center justify-between bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle className="w-3.5 h-3.5 text-red-500" />
-                    <span className="text-xs text-slate-700 font-medium truncate max-w-[200px]">{failedDeliveryFile.fileName}</span>
-                    <span className="text-xs text-slate-400">{failedDeliveryFile.rawOrders.length} pesanan</span>
-                  </div>
-                  <button
-                    onClick={() => setFailedDeliveryFile(marketplace, null)}
-                    className="text-slate-300 hover:text-red-400 ml-2"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ) : (
-                <DropZone
-                  onFile={handleFailedDeliveryFile}
-                  label="Upload Pesanan Failed Delivery"
-                  hint="CSV / XLSX (opsional)"
-                />
-              )}
-            </div>
-          )}
-
-        </div>
-      )}
     </div>
   );
 }
 
 // ──────────────────────────────────────────────────────────────
-// HPP Manager
+// Section Block
 // ──────────────────────────────────────────────────────────────
 
-function HppManager() {
-  const { hppEntries, addHppEntry, setHppEntries } = useAppStore();
-  const [form, setForm] = useState({ sku: "", productName: "", cost: "" });
-  const [open, setOpen] = useState(true);
-  const [duplicateKeys, setDuplicateKeys] = useState<string[]>([]);
-
-  const handleAdd = () => {
-    if (!form.sku && !form.productName) return;
-    addHppEntry({ sku: form.sku, productName: form.productName, cost: parseFloat(form.cost) || 0 });
-    setForm({ sku: "", productName: "", cost: "" });
-  };
-
-  const handleImportMasterFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const fileName = file.name.toLowerCase();
-    const isExcel = fileName.endsWith(".xlsx") || fileName.endsWith(".xls");
-    const content = isExcel ? await file.arrayBuffer() : await file.text();
-    const { entries, duplicateLabels } = parseProductMasterFileWithMeta(content);
-    setDuplicateKeys(duplicateLabels);
-    setHppEntries(entries);
-    e.target.value = "";
-  };
-
-  const handleResetHpp = () => {
-    setHppEntries([]);
-    setDuplicateKeys([]);
-    setForm({ sku: "", productName: "", cost: "" });
-  };
-
-  const hppPreviewEntries = Array.from(
-    hppEntries.reduce(
-      (acc, entry) => {
-        const masterProductName = (entry.masterProductName || entry.productName || "").trim();
-        const masterSku = (entry.masterSku || entry.sku || "").trim();
-        const key = `${masterProductName.toLowerCase()}|${masterSku.toLowerCase()}|${entry.cost}`;
-
-        if (!acc.has(key)) {
-          acc.set(key, {
-            key,
-            masterProductName,
-            masterSku,
-            sku: entry.sku,
-            productName: entry.productName,
-            cost: entry.cost,
-          });
-        }
-
-        return acc;
-      },
-      new Map<
-        string,
-        {
-          key: string;
-          masterProductName: string;
-          masterSku: string;
-          sku: string;
-          productName: string;
-          cost: number;
-        }
-      >()
-    ).values()
-  );
-
+function SectionBlock({
+  icon,
+  label,
+  hint,
+  optional,
+  accentColor,
+  children,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  hint?: string;
+  optional?: boolean;
+  accentColor: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors"
-      >
-        <div className="flex items-center gap-3">
-          <span className="font-semibold text-slate-800">HPP (Harga Pokok Penjualan)</span>
-          {hppEntries.length > 0 && (
-            <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
-              {hppPreviewEntries.length} Master SKU
+    <div className="space-y-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-muted)] p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span style={{ color: accentColor }}>{icon}</span>
+          <span className="text-xs font-semibold text-[var(--foreground)] uppercase tracking-wide">{label}</span>
+          {optional && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-md border border-[var(--border-subtle)] text-[var(--text-subtle)] font-medium">
+              Opsional
             </span>
           )}
         </div>
-        {open ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
-      </button>
+        {hint && <span className="text-[10px] text-[var(--text-subtle)] shrink-0">{hint}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
 
-      {open && (
-        <div className="px-4 pb-4 border-t border-slate-100 pt-4 space-y-3">
-          <div className="grid grid-cols-3 gap-2">
-            <input placeholder="SKU" value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })}
-              className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300" />
-            <input placeholder="Nama Produk" value={form.productName} onChange={(e) => setForm({ ...form, productName: e.target.value })}
-              className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300" />
-            <div className="flex gap-2">
-              <input placeholder="HPP (Rp)" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })}
-                type="number" className="border border-slate-200 rounded-lg px-3 py-2 text-sm flex-1 focus:outline-none focus:ring-2 focus:ring-slate-300" />
-              <button onClick={handleAdd} className="bg-slate-900 text-white rounded-lg px-3 hover:bg-slate-700 transition-colors">
-                <Plus className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
+// ──────────────────────────────────────────────────────────────
+// Step 1 — Marketplace + Store + Period selection
+// ──────────────────────────────────────────────────────────────
 
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-slate-500">
-              Gunakan tombol reset untuk hapus seluruh data HPP.
-            </p>
-            <button
-              onClick={handleResetHpp}
-              disabled={hppEntries.length === 0}
-              className="text-xs px-3 py-1.5 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Reset HPP
-            </button>
-          </div>
+interface Step1Props {
+  selectedMarketplace: MarketplaceId | null;
+  onSelectMarketplace: (mp: MarketplaceId) => void;
+  selectedStoreId: string | null;
+  onSelectStore: (id: string) => void;
+  selectedMonth: string | null;
+  onSelectMonth: (ym: string) => void;
+  onNext: () => void;
+}
 
-          <div className="border border-blue-100 bg-blue-50 rounded-lg p-3">
-            <p className="text-xs font-medium text-blue-800 mb-1">
-              Upload File HPP Produk (XLSX / CSV)
-            </p>
-            <p className="text-xs text-blue-700 mb-2">
-              Kolom: Master Product Name, Variant Name, Master SKU, HPP New, HPP Old, Master variation ID, Channel variation ID
-            </p>
-            <input
-              type="file"
-              accept=".csv,.xlsx,.xls"
-              onChange={handleImportMasterFile}
-              className="block w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-slate-700"
-            />
-            <p className="text-[11px] text-blue-600 mt-1">
-              HPP yang dipakai per Master SKU: HPP New (kolom H), fallback ke HPP Old (kolom G).
-            </p>
-          </div>
+function Step1({
+  selectedMarketplace,
+  onSelectMarketplace,
+  selectedStoreId,
+  onSelectStore,
+  selectedMonth,
+  onNext,
+  onSelectMonth,
+}: Step1Props) {
+  const canProceed = selectedMarketplace !== null && selectedStoreId !== null && selectedMonth !== null;
 
-          {duplicateKeys.length > 0 && (
-            <div className="border border-amber-200 bg-amber-50 rounded-lg p-3">
-              <p className="text-xs font-medium text-amber-800">
-                Ditemukan {duplicateKeys.length} data duplikat (SKU/Nama Produk).
-              </p>
-              <p className="text-xs text-amber-700 mt-1">
-                Sistem otomatis memakai baris terakhir untuk key yang sama.
-              </p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {duplicateKeys.slice(0, 12).map((key) => (
-                  <span
-                    key={key}
-                    className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200"
+  return (
+    <div className="space-y-5">
+      {/* Marketplace cards */}
+      <div>
+        <p className="text-sm font-semibold text-[var(--foreground)] mb-3">Pilih Marketplace</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {MARKETPLACES.map((mp) => {
+            const color = MARKETPLACE_COLORS[mp];
+            const label = MARKETPLACE_LABELS[mp];
+            const isSelected = selectedMarketplace === mp;
+            return (
+              <button
+                key={mp}
+                type="button"
+                onClick={() => onSelectMarketplace(mp)}
+                className="panel-card text-left transition-all"
+                style={{
+                  padding: "1rem",
+                  outline: isSelected ? `2px solid ${color}` : "2px solid transparent",
+                  outlineOffset: "2px",
+                }}
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm shrink-0"
+                    style={{ backgroundColor: color }}
                   >
-                    {key}
-                  </span>
-                ))}
-                {duplicateKeys.length > 12 && (
-                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
-                    +{duplicateKeys.length - 12} lainnya
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
+                    {label.charAt(0)}
+                  </div>
+                  <div>
+                    <p className="font-semibold text-sm text-[var(--foreground)]">{label}</p>
+                    <p className="text-xs text-[var(--text-subtle)] mt-0.5">
+                      {mp === "tokopedia" ? "Tokopedia + TikTok Shop" : mp === "shopee" ? "Shopee Seller Center" : "Lazada Seller Center"}
+                    </p>
+                  </div>
+                  {isSelected && (
+                    <CheckCircle className="w-4 h-4 ml-auto shrink-0" style={{ color }} />
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
-          {hppEntries.length > 0 && (
-            <div className="border border-slate-100 rounded-lg overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="text-left px-3 py-2 text-xs text-gray-500">Master SKU</th>
-                    <th className="text-left px-3 py-2 text-xs text-gray-500">SKU</th>
-                    <th className="text-left px-3 py-2 text-xs text-gray-500">Nama Produk</th>
-                    <th className="text-right px-3 py-2 text-xs text-gray-500">HPP/unit</th>
-                    <th className="px-2 py-2"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {hppPreviewEntries.map((entry) => (
-                    <tr key={entry.key} className="hover:bg-slate-50">
-                      <td className="px-3 py-2 text-gray-600 font-mono text-xs">{entry.masterSku || "-"}</td>
-                      <td className="px-3 py-2 text-gray-600 font-mono text-xs">{entry.sku}</td>
-                      <td className="px-3 py-2 text-gray-800">{entry.masterProductName || entry.productName}</td>
-                      <td className="px-3 py-2 text-right text-gray-800">{formatRupiah(entry.cost)}</td>
-                      <td className="px-2 py-2">
-                        <button onClick={() => setHppEntries(hppEntries.filter((e) => {
-                          const eMasterProductName = (e.masterProductName || e.productName || "").trim().toLowerCase();
-                          const eMasterSku = (e.masterSku || e.sku || "").trim().toLowerCase();
-                          return !(
-                            eMasterProductName === entry.masterProductName.trim().toLowerCase() &&
-                            eMasterSku === entry.masterSku.trim().toLowerCase() &&
-                            e.cost === entry.cost
-                          );
-                        }))}
-                          className="text-gray-300 hover:text-red-400">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      {/* Store + Month (visible once marketplace is selected) */}
+      {selectedMarketplace && (
+        <div className="panel-card p-4 space-y-4 animate-in fade-in duration-200">
+          <div
+            className="h-1 rounded-full mb-4 -mx-4 -mt-4"
+            style={{ backgroundColor: MARKETPLACE_COLORS[selectedMarketplace] }}
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-[var(--text-subtle)] uppercase tracking-wide">
+                Toko
+              </label>
+              <StorePicker
+                marketplace={selectedMarketplace}
+                value={selectedStoreId}
+                onChange={onSelectStore}
+              />
             </div>
-          )}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-[var(--text-subtle)] uppercase tracking-wide">
+                Periode Upload
+              </label>
+              <MonthPicker
+                value={selectedMonth}
+                onChange={onSelectMonth}
+              />
+            </div>
+          </div>
         </div>
       )}
+
+      {/* CTA */}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={!canProceed}
+          className="action-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+        >
+          Lanjut ke Upload
+          <ArrowRight className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
+// Step 2 — File upload zones
+// ──────────────────────────────────────────────────────────────
+
+interface Step2Props {
+  marketplace: MarketplaceId;
+  storeId: string;
+  storeName: string;
+  periodYear: number;
+  periodMonth: number;
+  slots: UploadSlots;
+  onSlotUpdate: (key: SlotKey, update: Partial<SlotState>) => void;
+  onBack: () => void;
+}
+
+function Step2({
+  marketplace,
+  storeId,
+  storeName,
+  periodYear,
+  periodMonth,
+  slots,
+  onSlotUpdate,
+  onBack,
+}: Step2Props) {
+  const router = useRouter();
+  const color = MARKETPLACE_COLORS[marketplace];
+  const label = MARKETPLACE_LABELS[marketplace];
+
+  const monthLabel = new Date(periodYear, periodMonth - 1).toLocaleDateString("id-ID", {
+    month: "long",
+    year: "numeric",
+  });
+
+  async function uploadFile(file: File, fileType: FileType, slotKey: SlotKey) {
+    onSlotUpdate(slotKey, { status: "uploading", error: undefined });
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("storeId", storeId);
+      formData.append("marketplace", marketplace);
+      formData.append("periodYear", String(periodYear));
+      formData.append("periodMonth", String(periodMonth));
+      formData.append("fileType", fileType);
+
+      const res = await fetch("/api/monthly-uploads", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+
+      const data = await res.json() as { id: string; rawRowCount: number };
+      onSlotUpdate(slotKey, {
+        status: "success",
+        fileName: file.name,
+        rowCount: data.rawRowCount,
+        uploadId: data.id,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      onSlotUpdate(slotKey, { status: "error", error: msg });
+    }
+  }
+
+  function clearSlot(key: SlotKey) {
+    onSlotUpdate(key, { status: "idle", fileName: undefined, rowCount: undefined, error: undefined, uploadId: undefined });
+  }
+
+  function renderSlot(
+    slotKey: SlotKey,
+    fileType: FileType,
+    dropLabel: string,
+    countLabel: string,
+    accentColor: string
+  ) {
+    const slot = slots[slotKey];
+    if (slot.status === "success" && slot.fileName) {
+      return (
+        <UploadedFileRow
+          fileName={slot.fileName}
+          count={slot.rowCount ?? 0}
+          countLabel={countLabel}
+          accentColor={accentColor}
+          onRemove={() => clearSlot(slotKey)}
+        />
+      );
+    }
+    return (
+      <div>
+        <DropZone
+          onFile={(file) => uploadFile(file, fileType, slotKey)}
+          label={dropLabel}
+          hint="CSV / XLSX"
+          uploading={slot.status === "uploading"}
+        />
+        {slot.status === "error" && slot.error && (
+          <div className="mt-1 flex items-center gap-1 text-red-500 text-xs">
+            <AlertCircle className="w-3 h-3" />
+            {slot.error}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const anySuccess = Object.values(slots).some((s) => s.status === "success");
+
+  return (
+    <div className="space-y-4">
+      {/* Context badge */}
+      <div className="panel-card p-4">
+        <div className="h-1 rounded-full -mx-4 -mt-4 mb-4" style={{ backgroundColor: color }} />
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-9 h-9 rounded-lg flex items-center justify-center text-white font-bold text-sm shrink-0"
+              style={{ backgroundColor: color }}
+            >
+              {label.charAt(0)}
+            </div>
+            <div>
+              <p className="font-semibold text-sm text-[var(--foreground)]">
+                {label} &middot; {storeName}
+              </p>
+              <p className="text-xs text-[var(--text-subtle)] mt-0.5">{monthLabel}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex items-center gap-1.5 text-sm text-[var(--text-subtle)] hover:text-[var(--foreground)] transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Ganti Toko
+          </button>
+        </div>
+      </div>
+
+      {/* File zones */}
+      <div className="space-y-3">
+        {/* Pesanan Selesai — 2 slots */}
+        <SectionBlock
+          icon={<ShoppingBag className="w-3.5 h-3.5" />}
+          label="Pesanan Selesai"
+          hint="Bulan ini wajib · bulan lalu opsional"
+          accentColor={color}
+        >
+          <div className="space-y-2">
+            {renderSlot("order_prev", "order", "Bulan Lalu (Opsional)", "pesanan", color)}
+            {renderSlot("order_curr", "order", "Bulan Ini", "pesanan", color)}
+          </div>
+        </SectionBlock>
+
+        {/* Transaksi Pendapatan */}
+        <SectionBlock
+          icon={<Receipt className="w-3.5 h-3.5" />}
+          label="Transaksi Pendapatan"
+          hint="Bulan yang dihitung"
+          accentColor="#10b981"
+        >
+          <div className="space-y-1">
+            {renderSlot("income", "income", "Upload Transaksi Pendapatan", "transaksi", "#10b981")}
+            {slots.income.status === "idle" && (
+              <p className="text-[10px] text-amber-400 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3 shrink-0" />
+                Tanpa file ini, fee platform dihitung dari estimasi — kurang akurat
+              </p>
+            )}
+          </div>
+        </SectionBlock>
+
+        {/* Retur TikTok — Tokopedia only */}
+        {marketplace === "tokopedia" && (
+          <SectionBlock
+            icon={<RotateCcw className="w-3.5 h-3.5" />}
+            label="Pesanan Retur TikTok"
+            optional
+            accentColor="#f97316"
+          >
+            {renderSlot("return", "return", "Upload Pesanan Retur", "retur", "#f97316")}
+          </SectionBlock>
+        )}
+
+        {/* Pesanan Cancel */}
+        <SectionBlock
+          icon={<X className="w-3.5 h-3.5" />}
+          label="Pesanan Cancel"
+          optional
+          accentColor="#f59e0b"
+        >
+          {renderSlot("cancel", "cancel", "Upload Pesanan Cancel", "cancel", "#f59e0b")}
+        </SectionBlock>
+
+        {/* Failed Delivery — Shopee only */}
+        {marketplace === "shopee" && (
+          <SectionBlock
+            icon={<TruckIcon className="w-3.5 h-3.5" />}
+            label="Pesanan Failed Delivery"
+            optional
+            accentColor="#f43f5e"
+          >
+            {renderSlot("failed", "failed", "Upload Pesanan Failed Delivery", "gagal kirim", "#f43f5e")}
+          </SectionBlock>
+        )}
+      </div>
+
+      {/* End state CTAs */}
+      <div className="panel-card p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-[var(--foreground)]">
+            {anySuccess
+              ? "File berhasil diunggah ke Bank Data"
+              : "Upload file marketplace di atas untuk mulai"}
+          </p>
+          <p className="text-xs text-[var(--text-subtle)] mt-0.5">
+            File tersimpan permanen dan bisa dilihat kapan saja di Bank Data
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            disabled={!anySuccess}
+            onClick={() =>
+              router.push(`/reports/new?storeId=${storeId}&year=${periodYear}&month=${periodMonth}`)
+            }
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-[var(--border-subtle)] text-sm font-semibold text-[var(--foreground)] hover:bg-[var(--surface-soft)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            Kalkulasi Sekarang
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+          <Link
+            href="/data-bank"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg action-primary text-sm font-semibold transition-colors"
+          >
+            <Database className="w-3.5 h-3.5" />
+            Lihat Data Bank
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }
@@ -665,212 +598,151 @@ function HppManager() {
 // Main Page
 // ──────────────────────────────────────────────────────────────
 
+type Step = 1 | 2;
+
 export default function UploadPage() {
-  const { uploadSets, hppEntries, configs, setReport } = useAppStore();
-  const router = useRouter();
-  const [calculating, setCalculating] = useState(false);
-  const [offlineForm, setOfflineForm] = useState({
-    productName: "",
-    qty: "1",
-    unit: "Unit",
-    totalPrice: "",
-    date: "",
-  });
+  const [step, setStep] = useState<Step>(1);
 
-  const marketplaceProgress = MARKETPLACES.map((marketplace) => {
-    const set = uploadSets[marketplace];
-    const orderCount = set?.orderFiles.length ?? 0;
-    const hasIncome = Boolean(set?.incomeFile);
-    const hasAny = orderCount > 0 || hasIncome;
-    const isComplete = orderCount === 2 && hasIncome;
-    return { marketplace, orderCount, hasIncome, hasAny, isComplete };
-  });
+  // Step 1 state
+  const [selectedMarketplace, setSelectedMarketplace] = useState<MarketplaceId | null>(null);
+  const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
+  const [selectedStoreName, setSelectedStoreName] = useState<string>("");
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
-  const totalMarketplaces = marketplaceProgress.filter((p) => p.hasAny).length;
-  const incompleteMarketplaces = marketplaceProgress.filter((p) => p.hasAny && !p.isComplete);
-  const isReadyToCalculate = totalMarketplaces > 0 && incompleteMarketplaces.length === 0;
+  // Step 2 state (upload slots, reset on each step 1 → 2 transition)
+  const [slots, setSlots] = useState<UploadSlots>(EMPTY_SLOTS);
 
-  const activeUploadSets = MARKETPLACES.reduce<Partial<Record<MarketplaceId, MarketplaceUploadSet>>>(
-    (acc, marketplace) => {
-      acc[marketplace] = uploadSets[marketplace];
-      return acc;
-    },
-    {}
-  );
+  // Store list is managed inside StorePicker but we need the name for display.
+  // We track it via a parallel lookup when storeId changes.
+  // StorePicker calls onChange(storeId) — we fetch name from API.
+  async function handleStoreChange(storeId: string) {
+    setSelectedStoreId(storeId);
+    // Fetch store name for display in step 2 header
+    try {
+      const res = await fetch(`/api/stores/${storeId}`);
+      if (res.ok) {
+        const data = await res.json() as { store: { storeName: string } };
+        setSelectedStoreName(data.store.storeName);
+      }
+    } catch {
+      setSelectedStoreName(storeId);
+    }
+  }
 
-  const totalOrders = MARKETPLACES.reduce(
-    (s, marketplace) =>
-      s + (uploadSets[marketplace]?.orderFiles.reduce((ss, f) => ss + f.rawOrders.length, 0) ?? 0),
-    0
-  );
+  function handleMarketplaceSelect(mp: MarketplaceId) {
+    if (mp !== selectedMarketplace) {
+      setSelectedMarketplace(mp);
+      setSelectedStoreId(null);
+      setSelectedStoreName("");
+    }
+  }
 
-  const totalIncome = MARKETPLACES.reduce(
-    (s, marketplace) => s + (uploadSets[marketplace]?.incomeFile?.transactions.length ?? 0),
-    0
-  );
+  function goToStep2() {
+    if (!selectedMarketplace || !selectedStoreId || !selectedMonth) return;
+    setSlots(EMPTY_SLOTS);
+    setStep(2);
+  }
 
-  const hasIncomeFiles = MARKETPLACES.some((marketplace) => uploadSets[marketplace]?.incomeFile !== null);
+  function goBackToStep1() {
+    setStep(1);
+    setSlots(EMPTY_SLOTS);
+  }
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (window.location.hash !== "#hpp-manager") return;
-    const hppSection = document.getElementById("hpp-manager");
-    if (!hppSection) return;
-    hppSection.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
+  function updateSlot(key: SlotKey, update: Partial<SlotState>) {
+    setSlots((prev) => ({ ...prev, [key]: { ...prev[key], ...update } }));
+  }
 
-  const handleCalculate = () => {
-    if (!isReadyToCalculate) return;
-    setCalculating(true);
-    setTimeout(() => {
-      const report = generateReportFromSets(activeUploadSets, hppEntries, configs);
-      setReport(report);
-      setCalculating(false);
-      router.push("/dashboard");
-    }, 100);
-  };
+  const parsed = parseYearMonth(selectedMonth);
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
-      <AppSidebar />
-      <div className="w-full px-4 py-8 sm:px-6 lg:px-8">
-          <div className="mb-6">
-            <h1 className="text-3xl font-extrabold tracking-tight text-slate-900">Modul Pendapatan</h1>
-            <p className="text-slate-600 mt-1 text-sm max-w-3xl">
-              Integrasikan laporan penjualan dari berbagai marketplace atau input data offline manual untuk analisa profit yang lebih cepat dan akurat.
-            </p>
+    <AuthAreaLayout contentClassName="w-full px-4 py-8 sm:px-6 lg:px-8">
+      <div className="max-w-3xl mx-auto">
+        {/* Page header */}
+        <div className="mb-6">
+          <div className="flex items-center gap-2 text-xs text-[var(--text-subtle)] mb-2">
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold",
+                step === 1
+                  ? "bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-text)]"
+                  : "text-[var(--text-subtle)]"
+              )}
+            >
+              <span className="w-4 h-4 rounded-full bg-current/10 flex items-center justify-center text-[10px] font-bold">1</span>
+              Pilih Toko &amp; Periode
+            </span>
+            <span className="text-[var(--border-subtle)]">/</span>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold",
+                step === 2
+                  ? "bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-text)]"
+                  : "text-[var(--text-subtle)]"
+              )}
+            >
+              <span className="w-4 h-4 rounded-full bg-current/10 flex items-center justify-center text-[10px] font-bold">2</span>
+              Upload File
+            </span>
           </div>
+          <h1 className="text-2xl font-extrabold tracking-tight text-[var(--foreground)]">
+            {step === 1 ? "Pilih Toko & Periode" : "Upload File Marketplace"}
+          </h1>
+          <p className="text-[var(--text-subtle)] mt-1 text-sm">
+            {step === 1
+              ? "Pilih marketplace, toko, dan bulan yang ingin diupload datanya."
+              : "Seret atau klik zona di bawah untuk mengunggah file export marketplace."}
+          </p>
+        </div>
 
-          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-5">
-            <div className="space-y-5">
-              <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 shadow-sm">
-                <p className="text-sm font-medium text-blue-800 mb-2">Contoh alur pengambilan data</p>
-                <div className="grid sm:grid-cols-2 gap-3 text-xs text-blue-700">
-                  <div className="flex items-start gap-2">
-                    <FileText className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="font-medium">Pesanan Selesai</p>
-                      <p>Upload 2 bulan (bulan lalu + bulan berjalan)</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <Receipt className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="font-medium">Transaksi Pendapatan</p>
-                      <p>Upload bulan yang dihitung saja</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                {MARKETPLACES.map((mp) => (
-                  <MarketplaceCard key={mp} marketplace={mp} />
-                ))}
-              </div>
-
-              <section id="hpp-manager" className="scroll-mt-6">
-                <HppManager />
-              </section>
-
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+        {/* Hint box — step 1 only */}
+        {step === 1 && (
+          <div className="panel-card-soft p-4 mb-5">
+            <p className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-2">Contoh alur pengambilan data</p>
+            <div className="grid sm:grid-cols-2 gap-3 text-xs text-blue-700 dark:text-blue-300">
+              <div className="flex items-start gap-2">
+                <FileText className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
                 <div>
-                  <p className="font-medium text-slate-800">
-                    {totalMarketplaces > 0
-                      ? `${totalMarketplaces} marketplace • ${totalOrders} pesanan • ${totalIncome} transaksi pendapatan`
-                      : "Belum ada data yang diupload"}
-                  </p>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    {!hasIncomeFiles
-                      ? "Upload Transaksi Pendapatan agar settlement akurat"
-                      : incompleteMarketplaces.length > 0
-                        ? `Lengkapi ${incompleteMarketplaces.map((p) => MARKETPLACE_LABELS[p.marketplace]).join(", ")}: 2 file Pesanan Selesai + 1 file Pendapatan`
-                        : "Siap dihitung: tiap marketplace sudah lengkap"}
-                  </p>
+                  <p className="font-medium">Pesanan Selesai</p>
+                  <p>Upload 2 bulan (bulan lalu + bulan berjalan)</p>
                 </div>
-                <button
-                  onClick={handleCalculate}
-                  disabled={!isReadyToCalculate || calculating}
-                  className="bg-slate-900 text-white px-5 py-2.5 rounded-lg font-semibold text-sm hover:bg-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm"
-                >
-                  {calculating && (
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  )}
-                  Hitung Revenue
-                </button>
+              </div>
+              <div className="flex items-start gap-2">
+                <Receipt className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="font-medium">Transaksi Pendapatan</p>
+                  <p>Upload bulan yang dihitung saja</p>
+                </div>
               </div>
             </div>
-
-            <aside className="space-y-4">
-              <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-                <p className="text-sm font-semibold text-slate-800 mb-3">Input Penjualan Offline</p>
-                <div className="space-y-2.5">
-                  <input
-                    placeholder="Nama produk/jasa"
-                    value={offlineForm.productName}
-                    onChange={(e) => setOfflineForm((prev) => ({ ...prev, productName: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-                  />
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      placeholder="Jumlah"
-                      value={offlineForm.qty}
-                      onChange={(e) => setOfflineForm((prev) => ({ ...prev, qty: e.target.value }))}
-                      className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-                    />
-                    <select
-                      value={offlineForm.unit}
-                      onChange={(e) => setOfflineForm((prev) => ({ ...prev, unit: e.target.value }))}
-                      className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-                    >
-                      <option>Unit</option>
-                      <option>Pcs</option>
-                      <option>Paket</option>
-                    </select>
-                  </div>
-                  <input
-                    placeholder="Total harga (Rp)"
-                    value={offlineForm.totalPrice}
-                    onChange={(e) => setOfflineForm((prev) => ({ ...prev, totalPrice: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-                  />
-                  <input
-                    type="date"
-                    value={offlineForm.date}
-                    onChange={(e) => setOfflineForm((prev) => ({ ...prev, date: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-                  />
-                  <button className="w-full rounded-lg bg-blue-700 hover:bg-blue-600 text-white text-sm font-semibold py-2.5">
-                    Simpan Data Offline
-                  </button>
-                </div>
-              </div>
-
-              <div className="bg-gradient-to-br from-blue-900 to-blue-700 text-white rounded-2xl p-4 shadow-sm">
-                <p className="text-xs uppercase tracking-wide text-blue-200">Target Bulanan</p>
-                <p className="text-3xl font-extrabold mt-1">74% Tercapai</p>
-                <div className="h-2 bg-white/20 rounded-full mt-3 overflow-hidden">
-                  <div className="h-full w-3/4 bg-emerald-300 rounded-full" />
-                </div>
-                <p className="text-xs text-blue-100 mt-2">Performa saat ini dari akumulasi data transaksi yang diupload.</p>
-              </div>
-
-              <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-                <p className="text-sm font-semibold text-slate-800 mb-2">Kontribusi Sumber Pendapatan</p>
-                <div className="space-y-1.5 text-xs text-slate-600">
-                  <div className="flex items-center justify-between">
-                    <span>Marketplace</span>
-                    <span className="font-semibold text-emerald-600">82%</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>Offline / Direct</span>
-                    <span className="font-semibold text-blue-700">18%</span>
-                  </div>
-                </div>
-              </div>
-            </aside>
           </div>
+        )}
+
+        {/* Step content */}
+        {step === 1 ? (
+          <Step1
+            selectedMarketplace={selectedMarketplace}
+            onSelectMarketplace={handleMarketplaceSelect}
+            selectedStoreId={selectedStoreId}
+            onSelectStore={handleStoreChange}
+            selectedMonth={selectedMonth}
+            onSelectMonth={setSelectedMonth}
+            onNext={goToStep2}
+          />
+        ) : (
+          selectedMarketplace && selectedStoreId && parsed && (
+            <Step2
+              marketplace={selectedMarketplace}
+              storeId={selectedStoreId}
+              storeName={selectedStoreName}
+              periodYear={parsed.year}
+              periodMonth={parsed.month}
+              slots={slots}
+              onSlotUpdate={updateSlot}
+              onBack={goBackToStep1}
+            />
+          )
+        )}
       </div>
-    </div>
+    </AuthAreaLayout>
   );
 }
