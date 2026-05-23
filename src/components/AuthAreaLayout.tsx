@@ -4,7 +4,7 @@
  * Used by: All authenticated pages (/dashboard, /upload, /reports, /settings, etc.)
  * Dependencies: AppSidebar, MobileBottomNav, next/navigation, lucide-react
  * Public functions: AuthAreaLayout (default export)
- * Side effects: None
+ * Side effects: Reads/writes localStorage key "sidebar-collapsed" for desktop collapse state
  */
 "use client";
 
@@ -15,6 +15,8 @@ import { Menu } from "lucide-react";
 import AppSidebar from "@/components/AppSidebar";
 import MobileBottomNav from "@/components/MobileBottomNav";
 import { cn } from "@/lib/utils";
+
+const STORAGE_KEY = "sidebar-collapsed";
 
 interface AuthAreaLayoutProps {
   children: ReactNode;
@@ -27,14 +29,35 @@ export default function AuthAreaLayout({
 }: AuthAreaLayoutProps) {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Hydrate from localStorage after mount (avoids SSR mismatch)
+  useEffect(() => {
+    if (localStorage.getItem(STORAGE_KEY) === "true") {
+      setSidebarCollapsed(true);
+    }
+  }, []);
 
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [pathname]);
 
+  const toggleSidebar = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem(STORAGE_KEY, String(next));
+      return next;
+    });
+  };
+
   return (
     <div className="auth-skin min-h-screen bg-[var(--shell-bg)] flex">
-      <AppSidebar mobileOpen={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />
+      <AppSidebar
+        mobileOpen={mobileMenuOpen}
+        onClose={() => setMobileMenuOpen(false)}
+        collapsed={sidebarCollapsed}
+        onToggle={toggleSidebar}
+      />
       <main className="flex-1 min-w-0 flex flex-col">
         <header className="h-14 border-b border-[var(--shell-border)] bg-[var(--shell-header-bg)] px-4 sm:px-6 lg:px-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
