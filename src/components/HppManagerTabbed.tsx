@@ -840,11 +840,11 @@ function CombinedTabPanel({ state, onSearch, onToggleConflicts, onPage }: Combin
                   </td>
                 </tr>
               ) : (
-                state.entries.map((entry) => {
+                state.entries.map((entry, idx) => {
                   const hasConflict = conflictSkus.has(entry.sku);
                   return (
                     <tr
-                      key={entry.id}
+                      key={entry.id ?? `combined-${idx}`}
                       className={`hover:bg-[var(--surface-soft)] transition-colors ${
                         hasConflict ? "bg-amber-500/5" : ""
                       }`}
