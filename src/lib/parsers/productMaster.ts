@@ -1,5 +1,15 @@
+/**
+ * Module: Product Master Parser
+ * Purpose: Parse HPP (cost-of-goods) master file into HppEntry[] for margin calculation
+ * Used by: src/app/hpp/page.tsx, HppManager component, reconcile.ts
+ * Dependencies: xlsxUtils.readFileToRows, types.HppEntry,
+ *               validation/headerDictionary.normalizeHeader (column normalization)
+ * Public functions: parseProductMasterFile(), parseProductMasterFileWithMeta()
+ * Side effects: none
+ */
 import type { HppEntry } from "../types";
 import { readFileToRows } from "./xlsxUtils";
+import { normalizeHeader } from "../validation/headerDictionary";
 
 export interface ProductMasterParseResult {
   entries: HppEntry[];
@@ -7,18 +17,20 @@ export interface ProductMasterParseResult {
   duplicateLabels: string[];
 }
 
+/**
+ * Find a column value by candidate header names.
+ * Uses normalizeHeader from headerDictionary for consistent normalization.
+ * Matches any candidate that is a substring of the column key or vice-versa.
+ */
 function findColumn(row: Record<string, string>, candidates: string[]): string {
-  const normalize = (value: string) =>
-    String(value ?? "")
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, " ")
-      .replace(/\s+/g, " ");
-
-  const normalizedCandidates = candidates.map(normalize);
+  const normalizedCandidates = candidates.map(normalizeHeader);
   for (const key of Object.keys(row)) {
-    const keyLower = normalize(key);
-    if (normalizedCandidates.some((candidate) => keyLower.includes(candidate))) {
+    const keyLower = normalizeHeader(key);
+    if (
+      normalizedCandidates.some(
+        (candidate) => keyLower.includes(candidate) || candidate.includes(keyLower)
+      )
+    ) {
       return row[key] ?? "";
     }
   }
@@ -53,7 +65,7 @@ function splitSkuValues(value: string): string[] {
   const raw = String(value ?? "").trim();
   if (!raw) return [];
   return raw
-    .split(/[,\n;]+/g)
+    .split(/[,\n;|/]+/g)
     .map((part) =>
       String(part ?? "")
         .trim()

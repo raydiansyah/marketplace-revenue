@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { defineConfig } from "drizzle-kit";
 
 export default defineConfig({
@@ -5,12 +6,12 @@ export default defineConfig({
   out: "./drizzle",
   dialect: "mysql",
   dbCredentials: {
-    host: process.env.TIDB_HOST ?? "127.0.0.1",
+    host: process.env.TIDB_HOST!,
     port: Number(process.env.TIDB_PORT ?? 4000),
-    user: process.env.TIDB_USER ?? "root",
-    password: process.env.TIDB_PASSWORD ?? "",
-    database: process.env.TIDB_DATABASE ?? "marketplace_revenue",
-    ssl: "required",
+    user: process.env.TIDB_USER!,
+    password: process.env.TIDB_PASSWORD!,
+    database: process.env.TIDB_DATABASE!,
+    ssl: { rejectUnauthorized: false },
   },
   strict: true,
   verbose: true,

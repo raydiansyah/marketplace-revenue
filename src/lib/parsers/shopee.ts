@@ -1,23 +1,27 @@
+/**
+ * Module: Shopee Order Parser
+ * Purpose: Parse Shopee Seller Center CSV/XLSX order exports into RawOrder[]
+ * Used by: src/app/upload/page.tsx (parseShopeeFile), reconcile.ts
+ * Dependencies: xlsxUtils.readFileToRows, types.RawOrder,
+ *               validation/headerDictionary.normalizeHeader (column normalization)
+ * Public functions: parseShopeeFile(), parseShopeeCSV() (deprecated)
+ * Side effects: none
+ */
 import type { RawOrder } from "../types";
 import { readFileToRows } from "./xlsxUtils";
+import { normalizeHeader } from "../validation/headerDictionary";
 
 /**
- * Kolom export Shopee (CSV atau XLSX dari Seller Center)
- * Kolom bisa bervariasi tergantung versi, jadi kita cari dengan beberapa kemungkinan nama.
+ * Find a column value by trying a list of candidate header names.
+ * Uses normalizeHeader from headerDictionary for consistent normalization.
+ * Priority: exact match first, then substring match.
  */
 function findColumn(row: Record<string, string>, candidates: string[]): string {
-  const normalize = (value: string) =>
-    value
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, " ")
-      .replace(/\s+/g, " ");
-
   const entries = Object.keys(row).map((key) => ({
     key,
-    normalizedKey: normalize(key),
+    normalizedKey: normalizeHeader(key),
   }));
-  const normalizedCandidates = candidates.map(normalize).filter(Boolean);
+  const normalizedCandidates = candidates.map(normalizeHeader).filter(Boolean);
 
   // 1) Exact match by candidate priority
   for (const candidate of normalizedCandidates) {
@@ -27,7 +31,9 @@ function findColumn(row: Record<string, string>, candidates: string[]): string {
 
   // 2) Contains match by candidate priority
   for (const candidate of normalizedCandidates) {
-    const partial = entries.find((entry) => entry.normalizedKey.includes(candidate));
+    const partial = entries.find((entry) =>
+      entry.normalizedKey.includes(candidate) || candidate.includes(entry.normalizedKey)
+    );
     if (partial) return row[partial.key] ?? "";
   }
 
@@ -66,20 +72,21 @@ function rowsToOrders(rows: Record<string, string>[]): RawOrder[] {
         "variation sku",
         "sku",
         "master sku",
+        "sku induk",
       ]);
       const qtyStr = findColumn(row, ["quantity", "jumlah"]);
       const qty = parseQty(qtyStr) || 1;
 
       // Harga jual
-      const sellingPriceStr = findColumn(row, ["original price", "harga asli", "unit price original price"]);
+      const sellingPriceStr = findColumn(row, ["original price", "harga asli", "unit price original price", "harga awal"]);
       const sellingPrice = parseAmount(sellingPriceStr);
 
       // Harga setelah diskon / yang dibayar pembeli
-      const dealPriceStr = findColumn(row, ["deal price", "harga deal", "unit price after discount"]);
+      const dealPriceStr = findColumn(row, ["deal price", "harga deal", "unit price after discount", "harga setelah diskon"]);
       const actualPrice = parseAmount(dealPriceStr) || sellingPrice;
 
       // Settlement amount (dana yang masuk ke seller)
-      const settlementStr = findColumn(row, ["seller settlement amount", "buyer payment", "settlement amount", "estimated seller income", "seller income"]);
+      const settlementStr = findColumn(row, ["seller settlement amount", "buyer payment", "settlement amount", "estimated seller income", "seller income", "total pembayaran"]);
       const settlementAmount = parseAmount(settlementStr);
 
       // Komisi yang dilaporkan
@@ -87,15 +94,15 @@ function rowsToOrders(rows: Record<string, string>[]): RawOrder[] {
       const reportedCommission = parseAmount(commissionStr);
 
       // Voucher seller
-      const voucherSellerStr = findColumn(row, ["seller voucher", "voucher dari seller", "seller discount"]);
+      const voucherSellerStr = findColumn(row, ["seller voucher", "voucher dari seller", "seller discount", "voucher ditanggung penjual", "diskon dari penjual"]);
       const voucherBySeller = parseAmount(voucherSellerStr);
 
       // Voucher platform
-      const voucherPlatformStr = findColumn(row, ["shopee voucher", "shopee discount", "platform voucher"]);
+      const voucherPlatformStr = findColumn(row, ["shopee voucher", "shopee discount", "platform voucher", "voucher ditanggung shopee", "diskon dari shopee"]);
       const voucherByPlatform = parseAmount(voucherPlatformStr);
 
       // Subsidi ongkir
-      const shippingSubsidyStr = findColumn(row, ["shipping fee subsidy", "ongkos kirim subsidi", "shipping subsidy"]);
+      const shippingSubsidyStr = findColumn(row, ["shipping fee subsidy", "ongkos kirim subsidi", "shipping subsidy", "estimasi potongan biaya pengiriman"]);
       const shippingSubsidy = parseAmount(shippingSubsidyStr);
 
       // Status

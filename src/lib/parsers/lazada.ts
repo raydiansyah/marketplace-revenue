@@ -1,3 +1,11 @@
+/**
+ * Module: Lazada Order Parser
+ * Purpose: Parse file Pesanan Selesai dan Pesanan Cancel dari Lazada menjadi RawOrder[]
+ * Used by: /upload (handleOrderFile, handleCanceledOrderFile), reconcile.ts
+ * Dependencies: xlsxUtils.readFileToRows, types.RawOrder
+ * Public functions: parseLazadaFile(), parseLazadaCancelFile()
+ * Side effects: none
+ */
 import type { RawOrder } from "../types";
 import { readFileToRows } from "./xlsxUtils";
 
@@ -149,4 +157,45 @@ function rowsToOrders(rows: Record<string, string>[]): RawOrder[] {
 
 export function parseLazadaFile(content: string | ArrayBuffer): RawOrder[] {
   return rowsToOrders(readFileToRows(content));
+}
+
+// Pesanan Cancel Lazada menggunakan format return-order (sama dengan TikTok).
+// Kolom kunci: "Order ID" → orderId, "Product Name" + "SKU Name" → productName, "Seller SKU" → sku.
+// Output RawOrder dipakai hanya untuk membuat daftar orderId yang di-exclude di reconcile.
+export function parseLazadaCancelFile(content: string | ArrayBuffer): RawOrder[] {
+  const rows = readFileToRows(content);
+  const parsed = rows
+    .map((row): RawOrder | null => {
+      const orderId = findColumn(row, ["order id"]);
+      if (!orderId) return null;
+
+      const productName = findColumn(row, ["product name"]);
+      const skuName = findColumn(row, ["sku name"]);
+      const sku = findColumn(row, ["seller sku"]);
+      const returnUnitPrice = parseAmount(findColumn(row, ["return unit price"]));
+      const returnQty = parseQty(findColumn(row, ["return quantity"]));
+      const status = findColumn(row, ["return status"]) || findColumn(row, ["order status"]) || "";
+
+      return {
+        orderId,
+        orderDate: findColumn(row, ["time requested", "refund time"]),
+        productName: [productName, skuName].filter(Boolean).join(" - ") || productName,
+        sku,
+        qty: returnQty || 1,
+        sellingPrice: returnUnitPrice,
+        actualPrice: returnUnitPrice,
+        status,
+        marketplace: "lazada",
+        rawData: row,
+      };
+    })
+    .filter((row): row is RawOrder => row !== null);
+
+  const seen = new Set<string>();
+  return parsed.filter((order) => {
+    const key = normalize(order.orderId);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }

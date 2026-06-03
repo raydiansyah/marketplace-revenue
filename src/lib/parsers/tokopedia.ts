@@ -62,10 +62,16 @@ function rowsToOrders(rows: Record<string, string>[]): RawOrder[] {
         "subtotal after seller discounts",
       ]));
       const orderAmount = parseAmount(findColumn(row, ["order amount", "total pembayaran", "total"]));
-      const actualPrice = qty > 0
+
+      // Gunakan qtyRaw (qty SEBELUM dikurangi return) saat menghitung actualPrice per unit,
+      // karena subtotalAfterDiscount mencakup nilai semua unit yang dibeli, termasuk yang
+      // di-return. Membagi dengan qty (yang sudah dikurangi qtyReturn) menghasilkan
+      // harga per unit yang inflated.
+      const qtyForPriceCalc = qtyRaw > 0 ? qtyRaw : qty;
+      const actualPrice = qtyForPriceCalc > 0
         ? (subtotalAfterDiscount > 0
-          ? subtotalAfterDiscount / qty
-          : (orderAmount > 0 ? orderAmount / qty : sellingPrice))
+          ? subtotalAfterDiscount / qtyForPriceCalc
+          : (orderAmount > 0 ? orderAmount / qtyForPriceCalc : sellingPrice))
         : sellingPrice;
 
       const commissionFee = parseAmount(findColumn(row, ["buyer service fee", "handling fee", "commission fee"]));
