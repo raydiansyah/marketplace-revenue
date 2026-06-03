@@ -1154,7 +1154,7 @@ export default function UploadResultPage() {
             <FileSpreadsheet className="mx-auto h-10 w-10 text-[var(--text-subtle)]" />
             <h1 className="mt-4 text-xl font-bold text-[var(--foreground)]">Belum ada hasil hitung upload</h1>
             <p className="mt-2 text-sm text-[var(--text-subtle)]">Hitung revenue dari halaman upload terlebih dahulu.</p>
-            <Link href="/upload" className="mt-5 inline-flex items-center rounded-lg bg-[var(--brand)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--brand-hover)]">
+            <Link href="/upload" className="mt-5 inline-flex items-center rounded-lg bg-[var(--brand)] px-4 py-2 text-sm font-medium text-[var(--background)] hover:bg-[var(--brand-hover)]">
               Ke Halaman Upload
             </Link>
           </div>
@@ -1188,7 +1188,7 @@ export default function UploadResultPage() {
                   <button
                     type="button"
                     onClick={() => { setShowSaveForm((v) => !v); setSaveError(null); }}
-                    className="inline-flex items-center gap-2 rounded-lg bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--brand-hover)] transition-colors"
+                    className="inline-flex items-center gap-2 rounded-lg bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-[var(--background)] hover:bg-[var(--brand-hover)] transition-colors"
                   >
                     <Save className="h-4 w-4" />
                     Simpan Laporan
@@ -1220,10 +1220,10 @@ export default function UploadResultPage() {
                     type="button"
                     onClick={() => void handleSaveReport()}
                     disabled={savingReport || !saveStoreName.trim()}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--brand)] px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--brand-hover)]"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--brand)] px-3 py-1.5 text-sm font-semibold text-[var(--background)] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--brand-hover)]"
                   >
                     {savingReport ? (
-                      <div className="h-3.5 w-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                      <div className="h-3.5 w-3.5 rounded-full border-2 border-[var(--background)] border-t-transparent animate-spin" />
                     ) : (
                       <Check className="h-3.5 w-3.5" />
                     )}
@@ -1808,7 +1808,7 @@ export default function UploadResultPage() {
                 type="button"
                 onClick={applyHppMapping}
                 disabled={!selectedHppOptionKey || savingHppMapping}
-                className="rounded-lg bg-amber-500 px-3 py-2 text-xs text-white hover:bg-amber-600 disabled:opacity-50"
+                className="rounded-lg bg-amber-500 px-3 py-2 text-xs text-[var(--background)] hover:bg-amber-600 disabled:opacity-50"
               >
                 {savingHppMapping ? "Menyimpan..." : "Gunakan HPP Ini"}
               </button>

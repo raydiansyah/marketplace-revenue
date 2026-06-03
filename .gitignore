@@ -1,3 +1,65 @@
-/node_modules
-.next
-.next-dev
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+.next-dev/
+out/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Testing
+coverage/
+.nyc_output/
+
+# IDE and OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Certificates and keys
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Database
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+# Drizzle
+drizzle/migrations/*.sql
+
+# Temporary files
+.temp/
+tmp/
+*.tmp

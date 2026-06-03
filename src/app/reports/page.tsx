@@ -14,18 +14,13 @@ import { FileText, FolderOpen, Pencil, Save, Trash2, X } from "lucide-react";
 import AuthAreaLayout from "@/components/AuthAreaLayout";
 import { useAppStore } from "@/store/app-store";
 import { formatRupiah } from "@/lib/utils";
-import { MARKETPLACE_LABELS, type MarketplaceId } from "@/lib/types";
+import { MARKETPLACE_LABELS, MARKETPLACE_COLORS, type MarketplaceId } from "@/lib/types";
 
 const MONTH_NAMES = [
   "Januari", "Februari", "Maret", "April", "Mei", "Juni",
   "Juli", "Agustus", "September", "Oktober", "November", "Desember",
 ];
 
-const MARKETPLACE_BADGE: Record<MarketplaceId, string> = {
-  shopee: "bg-orange-500/15 border-orange-500/30 text-orange-400",
-  tokopedia: "bg-emerald-500/15 border-emerald-500/30 text-emerald-400",
-  lazada: "bg-blue-500/15 border-blue-500/30 text-blue-400",
-};
 
 export default function SavedReportsPage() {
   const router = useRouter();
@@ -76,18 +71,13 @@ export default function SavedReportsPage() {
   };
 
   return (
-    <AuthAreaLayout contentClassName="px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-5xl space-y-5">
+    <AuthAreaLayout>
+      <div className="mx-auto max-w-[1400px] px-4 sm:px-6 py-6 space-y-5">
 
         {/* Header */}
-        <div className="flex items-start gap-4">
-          <div className="w-11 h-11 rounded-2xl bg-[var(--accent)]/15 border border-[var(--accent)]/25 flex items-center justify-center shrink-0">
-            <FileText className="w-5 h-5 text-[var(--accent)]" />
-          </div>
-          <div>
-            <h1 className="text-3xl font-extrabold tracking-tight text-[var(--foreground)]">Laporan Tersimpan</h1>
-            <p className="text-[var(--text-subtle)] mt-1 text-sm">Kelola, rename, dan buka ulang laporan tanpa upload ulang data.</p>
-          </div>
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Laporan Tersimpan</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Kelola, rename, dan buka ulang laporan tanpa upload ulang data.</p>
         </div>
 
         {/* Filter bar */}
@@ -162,7 +152,14 @@ export default function SavedReportsPage() {
                       ) : (
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="text-sm font-medium text-[var(--foreground)] truncate">{item.label}</p>
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-semibold shrink-0 ${MARKETPLACE_BADGE[item.marketplace]}`}>
+                          <span
+                            className="inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-semibold shrink-0"
+                            style={{
+                              color: MARKETPLACE_COLORS[item.marketplace],
+                              backgroundColor: `${MARKETPLACE_COLORS[item.marketplace]}15`,
+                              borderColor: `${MARKETPLACE_COLORS[item.marketplace]}30`,
+                            }}
+                          >
                             {MARKETPLACE_LABELS[item.marketplace]}
                           </span>
                           {periodLabel && (

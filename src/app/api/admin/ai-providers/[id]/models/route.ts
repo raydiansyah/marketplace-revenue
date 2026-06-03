@@ -5,6 +5,7 @@
  * Dependencies: src/lib/auth/session, src/lib/db/schema, src/lib/crypto/secret
  * Public functions: GET (list models for a provider)
  * Side effects: 1 external HTTP call to provider API; results cached in-memory for 1 hour
+ * Error handling: safeJson untuk external fetch; duck-type Response check untuk cross-realm instanceof
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -112,12 +113,18 @@ export async function GET(
 
     return NextResponse.json({ models });
   } catch (e) {
+    // requireRole/requireSession throws a Response (401/403)
+    // Use instanceof + duck-type fallback for cross-realm Response objects
     if (e instanceof Response) return e;
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    const isAbort = msg.includes("abort") || msg.includes("AbortError");
-    console.error("[GET /api/admin/ai-providers/[id]/models]", e);
+    if (e != null && typeof e === "object" && typeof (e as Response).status === "number" &&
+        typeof (e as Response).json === "function") {
+      return e as Response;
+    }
+    const err = e instanceof Error ? e : new Error(String(e));
+    const isAbort = err.name === "AbortError" || err.message.toLowerCase().includes("abort");
+    console.error("[GET /api/admin/ai-providers/[id]/models]", err);
     return NextResponse.json(
-      { error: isAbort ? "Request timeout — provider API tidak merespons dalam 15 detik" : `Server error: ${msg}` },
+      { error: isAbort ? "Request timeout — provider API tidak merespons dalam 15 detik" : `Server error: ${err.message}` },
       { status: 500 }
     );
   }

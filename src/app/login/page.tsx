@@ -5,12 +5,15 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import Link from "next/link";
 import { useNotification } from "@/lib/notifications/notification-context";
+import ThemeToggle from "@/components/ThemeToggle";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const { notify } = useNotification();
@@ -46,20 +49,31 @@ function LoginForm() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-[var(--background)] flex items-center justify-center p-4 relative">
+      {/* Theme toggle top-right */}
+      <div className="absolute top-4 right-4">
+        <ThemeToggle compact />
+      </div>
+
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="text-center mb-8">
-          <p className="text-[11px] tracking-widest text-slate-400 uppercase">FinArchitect</p>
-          <h1 className="text-2xl font-bold text-slate-800 mt-1">Marketplace Revenue</h1>
-          <p className="text-sm text-slate-500 mt-1">Masuk untuk melanjutkan</p>
+          <p className="text-[11px] tracking-widest text-[var(--text-muted)] uppercase">
+            FinArchitect
+          </p>
+          <h1 className="text-2xl font-bold text-[var(--foreground)] mt-1">
+            Marketplace Revenue
+          </h1>
+          <p className="text-sm text-[var(--text-subtle)] mt-1">
+            Masuk untuk melanjutkan
+          </p>
         </div>
 
         {/* Card */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8">
+        <div className="bg-[var(--surface)] rounded-2xl border border-[var(--border-subtle)] shadow-sm p-8">
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">
+              <label className="block text-sm font-medium text-[var(--foreground)] mb-1.5">
                 Email
               </label>
               <input
@@ -68,33 +82,46 @@ function LoginForm() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoComplete="email"
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                className="w-full px-3.5 py-2.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-muted)] text-sm text-[var(--foreground)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--accent)] transition"
                 placeholder="nama@email.com"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">
+              <label className="block text-sm font-medium text-[var(--foreground)] mb-1.5">
                 Password
               </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                autoComplete="current-password"
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-                placeholder="••••••••"
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  autoComplete="current-password"
+                  className="w-full px-3.5 py-2.5 pr-10 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-muted)] text-sm text-[var(--foreground)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)] focus:border-[var(--accent)] transition"
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-subtle)] transition-colors"
+                  aria-label={showPassword ? "Sembunyikan password" : "Tampilkan password"}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
               <div className="mt-2 text-right">
-                <Link href="/forgot-password" className="text-xs text-blue-600 hover:text-blue-700 underline">
+                <Link
+                  href="/forgot-password"
+                  className="text-xs text-[var(--accent)] hover:underline"
+                >
                   Lupa password?
                 </Link>
               </div>
             </div>
 
             {error && (
-              <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3.5 py-2.5">
+              <p className="text-sm text-[var(--negative)] bg-[var(--negative-bg)] border border-[var(--negative)]/20 rounded-lg px-3.5 py-2.5">
                 {error}
               </p>
             )}
@@ -102,14 +129,15 @@ function LoginForm() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-semibold py-2.5 rounded-lg transition-colors"
+              className="w-full bg-[var(--accent)] hover:opacity-90 disabled:opacity-50 text-[var(--background)] text-sm font-semibold py-2.5 rounded-lg transition-opacity flex items-center justify-center gap-2"
             >
+              {loading && <Loader2 className="w-4 h-4 animate-spin" />}
               {loading ? "Memverifikasi..." : "Masuk"}
             </button>
           </form>
         </div>
 
-        <p className="text-center text-xs text-slate-400 mt-6">
+        <p className="text-center text-xs text-[var(--text-muted)] mt-6">
           Akses hanya untuk pengguna yang terdaftar.
         </p>
       </div>

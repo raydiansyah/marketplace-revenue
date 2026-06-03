@@ -141,6 +141,8 @@ function ProvidersTab({ notify }: { notify: ReturnType<typeof useNotification>["
   const [showModelsId, setShowModelsId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [modelSearchMap, setModelSearchMap] = useState<Record<string, string>>({});
+  const [settingModel, setSettingModel] = useState<string | null>(null); // "providerId:modelId"
 
   useEffect(() => {
     fetch("/api/admin/ai-providers")
@@ -248,17 +250,53 @@ function ProvidersTab({ notify }: { notify: ReturnType<typeof useNotification>["
     setLoadingModelsId(id);
     try {
       const res = await fetch(`/api/admin/ai-providers/${id}/models`);
-      const data = (await res.json()) as { models?: string[]; error?: string };
+      const text = await res.text();
+      let data: { models?: string[]; error?: string } = {};
+      try {
+        data = JSON.parse(text);
+      } catch {
+        notify("error", `Server error ${res.status}: respons bukan JSON. Cek server log.`);
+        console.error("[loadModels] non-JSON response:", res.status, text.slice(0, 300));
+        return;
+      }
       if (!res.ok) {
         notify("error", data.error ?? "Gagal memuat models");
         return;
       }
       setModelsMap((prev) => ({ ...prev, [id]: data.models ?? [] }));
       setShowModelsId(id);
-    } catch {
+    } catch (err) {
       notify("error", "Gagal memuat daftar model.");
+      console.error("[loadModels] fetch error:", err);
     } finally {
       setLoadingModelsId(null);
+    }
+  }
+
+  async function handleSetModel(providerId: string, modelId: string | null) {
+    const key = `${providerId}:${modelId ?? ""}`;
+    setSettingModel(key);
+    try {
+      const res = await fetch(`/api/admin/ai-providers/${providerId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ defaultModel: modelId }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        notify("error", d?.error ?? "Gagal mengatur model");
+        return;
+      }
+      setProviders((prev) =>
+        prev.map((p) =>
+          p.id === providerId ? { ...p, defaultModel: modelId ?? undefined } : p
+        )
+      );
+      notify("success", modelId ? `Model "${modelId}" diset sebagai default.` : "Default model dihapus.");
+    } catch {
+      notify("error", "Terjadi kesalahan saat mengatur model.");
+    } finally {
+      setSettingModel(null);
     }
   }
 
@@ -454,18 +492,81 @@ function ProvidersTab({ notify }: { notify: ReturnType<typeof useNotification>["
                     </div>
                   )}
                   {showModelsId === p.id && modelsMap[p.id] && (
-                    <div className="mt-2 bg-slate-50 border border-slate-100 rounded-lg p-2 max-h-40 overflow-y-auto">
-                      {modelsMap[p.id].length === 0 ? (
-                        <p className="text-xs text-slate-400">Tidak ada model tersedia.</p>
-                      ) : (
-                        <ul className="space-y-0.5">
-                          {modelsMap[p.id].map((m) => (
-                            <li key={m} className="text-xs text-slate-600 font-mono">
-                              {m}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
+                    <div className="mt-3 border border-[var(--border-subtle)] rounded-xl overflow-hidden">
+                      {/* Header */}
+                      <div className="flex items-center justify-between px-3 py-2 bg-[var(--surface-soft)] border-b border-[var(--border-subtle)]">
+                        <span className="text-xs font-semibold text-[var(--text-subtle)]">Pilih Model Default</span>
+                        {p.defaultModel && (
+                          <button
+                            onClick={() => handleSetModel(p.id, null)}
+                            disabled={settingModel !== null && settingModel.startsWith(p.id)}
+                            className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50 transition-colors"
+                          >
+                            Hapus pilihan
+                          </button>
+                        )}
+                      </div>
+                      {/* Search */}
+                      <div className="px-3 py-2 border-b border-[var(--border-subtle)] bg-[var(--background)]">
+                        <input
+                          value={modelSearchMap[p.id] ?? ""}
+                          onChange={(e) =>
+                            setModelSearchMap((prev) => ({ ...prev, [p.id]: e.target.value }))
+                          }
+                          placeholder="Filter model..."
+                          className="w-full text-xs bg-transparent outline-none placeholder-slate-400 text-[var(--foreground)]"
+                        />
+                      </div>
+                      {/* Model list */}
+                      <div className="max-h-52 overflow-y-auto bg-[var(--background)]">
+                        {modelsMap[p.id].length === 0 ? (
+                          <p className="text-xs text-slate-400 px-3 py-4 text-center">
+                            Tidak ada model tersedia.
+                          </p>
+                        ) : (
+                          (() => {
+                            const search = (modelSearchMap[p.id] ?? "").toLowerCase();
+                            const filtered = search
+                              ? modelsMap[p.id].filter((m) => m.toLowerCase().includes(search))
+                              : modelsMap[p.id];
+                            return filtered.length === 0 ? (
+                              <p className="text-xs text-slate-400 px-3 py-4 text-center">
+                                Tidak ada hasil untuk &ldquo;{modelSearchMap[p.id]}&rdquo;
+                              </p>
+                            ) : (
+                              <ul className="divide-y divide-[var(--border-subtle)]">
+                                {filtered.map((m) => {
+                                  const isSelected = p.defaultModel === m;
+                                  const isSaving = settingModel === `${p.id}:${m}`;
+                                  return (
+                                    <li key={m}>
+                                      <button
+                                        onClick={() => !isSelected && handleSetModel(p.id, m)}
+                                        disabled={
+                                          isSelected ||
+                                          (settingModel !== null && settingModel.startsWith(p.id))
+                                        }
+                                        className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-left transition-colors ${
+                                          isSelected
+                                            ? "bg-[var(--accent)]/10 text-[var(--accent)] cursor-default"
+                                            : "hover:bg-[var(--surface-soft)] text-[var(--foreground)] disabled:opacity-40"
+                                        }`}
+                                      >
+                                        <span className="text-xs font-mono truncate">{m}</span>
+                                        {isSaving ? (
+                                          <Loader2 className="w-3 h-3 animate-spin shrink-0 text-[var(--accent)]" />
+                                        ) : isSelected ? (
+                                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                                        ) : null}
+                                      </button>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            );
+                          })()
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -503,7 +604,7 @@ function ProvidersTab({ notify }: { notify: ReturnType<typeof useNotification>["
                     onClick={() => handleLoadModels(p.id)}
                     disabled={loadingModelsId === p.id}
                     className="p-1.5 text-slate-500 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors disabled:opacity-50"
-                    title="Lihat daftar model"
+                    title="Pilih model default"
                   >
                     {loadingModelsId === p.id ? (
                       <Loader2 className="w-4 h-4 animate-spin" />

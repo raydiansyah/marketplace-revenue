@@ -114,30 +114,33 @@ function DropZone({ onFile, label, hint, disabled, uploading }: DropZoneProps) {
       <div
         {...getRootProps()}
         className={cn(
-          "border-2 border-dashed rounded-xl px-4 py-3 text-center cursor-pointer transition-all",
+          "border-2 border-dashed rounded-xl px-4 py-4 text-center cursor-pointer transition-all duration-200",
           isDragActive
-            ? "border-blue-400 bg-blue-50"
-            : "border-[var(--border-subtle)] bg-[var(--surface)] hover:border-slate-300 hover:bg-[var(--surface-muted)]",
-          (disabled || uploading) && "opacity-40 cursor-not-allowed"
+            ? "border-[var(--accent)] bg-[var(--accent-soft)] scale-[1.01]"
+            : "border-[var(--border-subtle)] bg-[var(--surface)] hover:border-[var(--accent)] hover:bg-[var(--surface-muted)] hover:scale-[1.005]",
+          (disabled || uploading) && "opacity-40 cursor-not-allowed hover:scale-100 hover:border-[var(--border-subtle)]"
         )}
+        style={{
+          boxShadow: isDragActive ? "0 0 0 4px var(--accent-glow)" : "none",
+        }}
       >
         <input {...getInputProps()} />
         {uploading ? (
-          <div className="flex items-center justify-center gap-2 text-slate-500 text-sm">
-            <div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
-            Mengunggah...
+          <div className="flex items-center justify-center gap-2.5 text-[var(--text-subtle)] text-sm py-1">
+            <div className="w-4 h-4 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+            <span className="font-medium">Mengunggah...</span>
           </div>
         ) : (
-          <div className="flex items-center gap-2 justify-center">
-            <Upload className="w-4 h-4 text-slate-400" />
-            <span className="text-sm text-slate-600 font-medium">{label}</span>
-            <span className="text-xs text-slate-300">{hint}</span>
+          <div className="flex items-center gap-2.5 justify-center">
+            <Upload className={cn("w-4 h-4 transition-colors", isDragActive ? "text-[var(--accent)]" : "text-[var(--text-subtle)]")} />
+            <span className="text-sm font-medium text-[var(--foreground)]">{label}</span>
+            <span className="text-xs text-[var(--text-muted)]">{hint}</span>
           </div>
         )}
       </div>
       {localError && (
-        <div className="mt-1 flex items-center gap-1 text-red-500 text-xs">
-          <AlertCircle className="w-3 h-3" />
+        <div className="mt-1.5 flex items-center gap-1.5 text-[var(--negative)] text-xs font-medium">
+          <AlertCircle className="w-3.5 h-3.5" />
           {localError}
         </div>
       )}
@@ -269,11 +272,13 @@ function Step1({
                 key={mp}
                 type="button"
                 onClick={() => onSelectMarketplace(mp)}
-                className="panel-card text-left transition-all"
+                className="panel-card text-left transition-all duration-200 hover:-translate-y-0.5"
                 style={{
                   padding: "1rem",
                   outline: isSelected ? `2px solid ${color}` : "2px solid transparent",
                   outlineOffset: "2px",
+                  boxShadow: isSelected ? `0 10px 30px ${color}20` : "0 0 0 transparent",
+                  background: isSelected ? `linear-gradient(135deg, ${color}10, var(--surface))` : "var(--surface)",
                 }}
               >
                 <div className="flex items-center gap-3">
@@ -301,9 +306,9 @@ function Step1({
 
       {/* Store + Month (visible once marketplace is selected) */}
       {selectedMarketplace && (
-        <div className="panel-card p-4 space-y-4 animate-in fade-in duration-200">
+        <div className="panel-card p-4 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
           <div
-            className="h-1 rounded-full mb-4 -mx-4 -mt-4"
+            className="h-1.5 rounded-full mb-4 -mx-4 -mt-4 animate-in slide-in-from-left duration-500"
             style={{ backgroundColor: MARKETPLACE_COLORS[selectedMarketplace] }}
           />
 
@@ -337,7 +342,7 @@ function Step1({
           type="button"
           onClick={onNext}
           disabled={!canProceed}
-          className="action-primary inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+          className="action-primary inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 hover:gap-3 disabled:hover:gap-2"
         >
           Lanjut ke Upload
           <ArrowRight className="w-4 h-4" />
@@ -461,8 +466,8 @@ function Step2({
   return (
     <div className="space-y-4">
       {/* Context badge */}
-      <div className="panel-card p-4">
-        <div className="h-1 rounded-full -mx-4 -mt-4 mb-4" style={{ backgroundColor: color }} />
+      <div className="panel-card p-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+        <div className="h-1.5 rounded-full -mx-4 -mt-4 mb-4 animate-in slide-in-from-left duration-500" style={{ backgroundColor: color }} />
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <div
@@ -653,41 +658,60 @@ export default function UploadPage() {
   }
 
   const parsed = parseYearMonth(selectedMonth);
+  const step2Context = selectedMarketplace && selectedStoreId && parsed
+    ? { marketplace: selectedMarketplace, storeId: selectedStoreId, parsed }
+    : null;
 
   return (
-    <AuthAreaLayout contentClassName="w-full px-4 py-8 sm:px-6 lg:px-8">
-      <div className="max-w-3xl mx-auto">
+    <AuthAreaLayout>
+      <div className="mx-auto max-w-[1400px] px-4 sm:px-6 py-6">
+        <div className="max-w-3xl mx-auto">
         {/* Page header */}
         <div className="mb-6">
-          <div className="flex items-center gap-2 text-xs text-[var(--text-subtle)] mb-2">
-            <span
-              className={cn(
-                "inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold",
-                step === 1
-                  ? "bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-text)]"
-                  : "text-[var(--text-subtle)]"
-              )}
-            >
-              <span className="w-4 h-4 rounded-full bg-current/10 flex items-center justify-center text-[10px] font-bold">1</span>
-              Pilih Toko &amp; Periode
-            </span>
-            <span className="text-[var(--border-subtle)]">/</span>
-            <span
-              className={cn(
-                "inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold",
-                step === 2
-                  ? "bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-text)]"
-                  : "text-[var(--text-subtle)]"
-              )}
-            >
-              <span className="w-4 h-4 rounded-full bg-current/10 flex items-center justify-center text-[10px] font-bold">2</span>
-              Upload File
-            </span>
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  "inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-xs transition-all duration-200",
+                  step === 1
+                    ? "bg-[var(--accent)] text-[var(--background)] shadow-lg"
+                    : "bg-[var(--positive-bg)] text-[var(--positive)]"
+                )}
+              >
+                <span className={cn(
+                  "w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold transition-all",
+                  step === 1 ? "bg-white/20" : "bg-[var(--positive)]/20"
+                )}>
+                  {step === 1 ? "1" : <CheckCircle className="w-3 h-3" />}
+                </span>
+                Pilih Toko &amp; Periode
+              </span>
+            </div>
+            <div className={cn(
+              "h-0.5 w-8 rounded-full transition-all duration-300",
+              step === 2 ? "bg-[var(--accent)]" : "bg-[var(--border-subtle)]"
+            )} />
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  "inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-xs transition-all duration-200",
+                  step === 2
+                    ? "bg-[var(--accent)] text-[var(--background)] shadow-lg"
+                    : "bg-[var(--surface-muted)] text-[var(--text-subtle)]"
+                )}
+              >
+                <span className={cn(
+                  "w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold",
+                  step === 2 ? "bg-white/20" : "bg-[var(--text-subtle)]/10"
+                )}>2</span>
+                Upload File
+              </span>
+            </div>
           </div>
-          <h1 className="text-2xl font-extrabold tracking-tight text-[var(--foreground)]">
+          <h1 className="text-2xl font-extrabold tracking-tight text-[var(--foreground)] animate-in fade-in slide-in-from-bottom-1 duration-300">
             {step === 1 ? "Pilih Toko & Periode" : "Upload File Marketplace"}
           </h1>
-          <p className="text-[var(--text-subtle)] mt-1 text-sm">
+          <p className="text-[var(--text-subtle)] mt-1.5 text-sm animate-in fade-in slide-in-from-bottom-1 duration-300" style={{ animationDelay: "50ms" }}>
             {step === 1
               ? "Pilih marketplace, toko, dan bulan yang ingin diupload datanya."
               : "Seret atau klik zona di bawah untuk mengunggah file export marketplace."}
@@ -697,8 +721,8 @@ export default function UploadPage() {
         {/* Hint box — step 1 only */}
         {step === 1 && (
           <div className="panel-card-soft p-4 mb-5">
-            <p className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-2">Contoh alur pengambilan data</p>
-            <div className="grid sm:grid-cols-2 gap-3 text-xs text-blue-700 dark:text-blue-300">
+            <p className="text-sm font-medium text-[var(--foreground)] mb-2">Contoh alur pengambilan data</p>
+            <div className="grid sm:grid-cols-2 gap-3 text-xs text-[var(--text-subtle)]">
               <div className="flex items-start gap-2">
                 <FileText className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
                 <div>
@@ -728,20 +752,32 @@ export default function UploadPage() {
             onSelectMonth={setSelectedMonth}
             onNext={goToStep2}
           />
+        ) : step2Context ? (
+          <Step2
+            marketplace={step2Context.marketplace}
+            storeId={step2Context.storeId}
+            storeName={selectedStoreName}
+            periodYear={step2Context.parsed.year}
+            periodMonth={step2Context.parsed.month}
+            slots={slots}
+            onSlotUpdate={updateSlot}
+            onBack={goBackToStep1}
+          />
         ) : (
-          selectedMarketplace && selectedStoreId && parsed && (
-            <Step2
-              marketplace={selectedMarketplace}
-              storeId={selectedStoreId}
-              storeName={selectedStoreName}
-              periodYear={parsed.year}
-              periodMonth={parsed.month}
-              slots={slots}
-              onSlotUpdate={updateSlot}
-              onBack={goBackToStep1}
-            />
-          )
+          <div className="panel-card p-5 text-sm">
+            <p className="font-semibold text-[var(--foreground)]">Data Step 2 belum lengkap.</p>
+            <p className="text-[var(--text-subtle)] mt-1">Pilih ulang marketplace, toko, dan periode lalu lanjutkan kembali.</p>
+            <button
+              type="button"
+              onClick={goBackToStep1}
+              className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[var(--border-subtle)] text-[var(--foreground)] hover:bg-[var(--surface-soft)]"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Kembali ke Step 1
+            </button>
+          </div>
         )}
+        </div>
       </div>
     </AuthAreaLayout>
   );

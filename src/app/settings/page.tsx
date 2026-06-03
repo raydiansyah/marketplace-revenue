@@ -128,7 +128,7 @@ function ShopeeSettings() {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <PercentInput
           label="Komisi Platform"
           value={c.commissionRate}
@@ -143,7 +143,7 @@ function ShopeeSettings() {
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <RpInput
           label="Order Processing Fee (per order)"
           value={c.orderProcessingFee}
@@ -217,7 +217,7 @@ function TokopediaSettings() {
           Konfigurasi ini dipakai untuk Tokopedia dan TikTok Shop (model fee gabungan).
         </p>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <PercentInput
           label="Komisi Platform"
           value={c.commissionRate}
@@ -231,7 +231,7 @@ function TokopediaSettings() {
           help="4% - 6% per transaksi"
         />
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <RpInput
           label="Dynamic Commission Max (per item)"
           value={c.dynamicCommissionMax}
@@ -259,7 +259,7 @@ function TokopediaSettings() {
         help="Aktifkan jika kamu adalah seller Official Store / Mall"
       />
       {c.isMall && (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <PercentInput
             label="Mall Service Fee"
             value={c.mallServiceFeeRate}
@@ -284,7 +284,7 @@ function LazadaSettings() {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <PercentInput
           label="Administrative Fee"
           value={c.adminFee}
@@ -298,7 +298,7 @@ function LazadaSettings() {
           help="2.43% - 22.5% (naik Nov 2025)"
         />
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <PercentInput
           label="Payment Processing Fee"
           value={c.paymentProcessingRate}
@@ -492,19 +492,15 @@ export default function SettingsPage() {
   const ActiveComponent = SETTINGS_COMPONENTS[active];
 
   return (
-    <AuthAreaLayout contentClassName="px-4 py-8 sm:px-6">
-      <div className="max-w-2xl w-full mx-auto">
+    <AuthAreaLayout>
+      <div className="mx-auto max-w-[1400px] px-4 sm:px-6 py-6">
+        <div className="max-w-2xl mx-auto">
         {/* Header */}
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-9 h-9 rounded-xl bg-[var(--accent-soft)] flex items-center justify-center flex-shrink-0">
-            <Settings2 className="w-5 h-5 text-[var(--accent)]" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-[var(--foreground)]">Konfigurasi Fee Marketplace</h1>
-            <p className="text-sm text-[var(--text-subtle)] mt-0.5">
-              Atur persentase biaya sesuai kondisi seller kamu.
-            </p>
-          </div>
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold text-foreground">Konfigurasi Fee Marketplace</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Atur persentase biaya sesuai kondisi seller kamu.
+          </p>
         </div>
 
         {/* Fee Config Card */}
@@ -535,6 +531,7 @@ export default function SettingsPage() {
         </p>
 
         <ProfileSecuritySettings />
+        </div>
       </div>
     </AuthAreaLayout>
   );
