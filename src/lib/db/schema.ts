@@ -3,7 +3,7 @@
  * Purpose: Drizzle ORM table definitions for TiDB (MySQL-compatible)
  * Used by: src/lib/db/client.ts, all API routes via query helpers
  * Dependencies: drizzle-orm/mysql-core
- * Tables: users, savedReports, hppEntries, userConfigs, passwordResetTokens, stores, monthlyUploads, hppMarketplaceEntries, adsEntries, cashflowEntries, aiProviders, aiRequestLogs, refreshTokens, accessTokenBlacklist, loginEvents, aiAgentPersonas, ragDocuments, ragChunks
+ * Tables: users, savedReports, hppEntries, userConfigs, passwordResetTokens, stores, monthlyUploads, hppMarketplaceEntries, hppSkuAliases, adsEntries, cashflowEntries, aiProviders, aiRequestLogs, refreshTokens, accessTokenBlacklist, loginEvents, aiAgentPersonas, ragDocuments, ragChunks
  * Side effects: Schema changes require npm run db:generate then db:migrate
  * Phase 2: savedReports extended with storeId, periodYear, periodMonth
  * Phase 3: hppMarketplaceEntries added for per-marketplace HPP management
@@ -11,6 +11,7 @@
  * Phase 5: aiProviders + aiRequestLogs added for AI features
  * Phase 6: refreshTokens + accessTokenBlacklist + loginEvents added for JWT hardening
  * Phase 7: aiAgentPersonas + ragDocuments + ragChunks added for RAG + persona management
+ * Phase 8: hppSkuAliases added for master HPP import manual mapping; hppMarketplaceEntries.marketplace made nullable
  */
 
 import {
@@ -275,7 +276,7 @@ export const hppMarketplaceEntries = mysqlTable(
   {
     id: varchar("id", { length: 40 }).primaryKey(),
     userId: varchar("user_id", { length: 40 }).notNull(),
-    marketplace: mysqlEnum("marketplace", ["shopee", "tokopedia", "lazada"]).notNull(),
+    marketplace: mysqlEnum("marketplace", ["shopee", "tokopedia", "lazada"]),
     sku: varchar("sku", { length: 191 }).notNull().default(""),
     productName: varchar("product_name", { length: 500 }).notNull(),
     masterSku: varchar("master_sku", { length: 191 }),
@@ -292,6 +293,27 @@ export const hppMarketplaceEntries = mysqlTable(
 
 export type HppMarketplaceEntryRow = typeof hppMarketplaceEntries.$inferSelect;
 export type NewHppMarketplaceEntryRow = typeof hppMarketplaceEntries.$inferInsert;
+
+// ============================================================
+// HPP SKU ALIASES (master import manual mapping)
+// ============================================================
+
+export const hppSkuAliases = mysqlTable(
+  "hpp_sku_aliases",
+  {
+    id: varchar("id", { length: 40 }).primaryKey(),
+    userId: varchar("user_id", { length: 40 }).notNull(),
+    orderSku: varchar("order_sku", { length: 191 }).notNull(),
+    masterEntryId: varchar("master_entry_id", { length: 40 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => ({
+    userOrderSkuIdx: index("idx_hpp_aliases_user_sku").on(t.userId, t.orderSku),
+  })
+);
+
+export type HppSkuAliasRow = typeof hppSkuAliases.$inferSelect;
+export type NewHppSkuAliasRow = typeof hppSkuAliases.$inferInsert;
 
 // ============================================================
 // ADS ENTRIES
