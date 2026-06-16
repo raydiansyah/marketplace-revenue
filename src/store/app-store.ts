@@ -239,10 +239,20 @@ export const useAppStore = create<AppStore>()((set, get) => ({
   loadHpp: async () => {
     set({ hppLoading: true, hppError: null });
     try {
-      const res = await fetch("/api/hpp");
+      const res = await fetch("/api/hpp/master?limit=500");
       if (res.ok) {
         const data = await res.json();
-        set({ hppEntries: data.entries ?? [], hppError: null });
+        const hppEntries: HppEntry[] = (data.entries ?? []).map((e: {
+          sku: string; productName: string; masterProductName?: string;
+          masterSku?: string; cost: number;
+        }) => ({
+          sku: e.sku,
+          productName: e.productName,
+          masterProductName: e.masterProductName,
+          masterSku: e.masterSku,
+          cost: e.cost,
+        }));
+        set({ hppEntries, hppError: null });
       } else {
         throw new Error(`HTTP ${res.status}`);
       }
