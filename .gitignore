@@ -59,6 +59,13 @@ Thumbs.db
 # Drizzle
 drizzle/migrations/*.sql
 
+# Claude
+.claude/
+.claude-flow/
+
+# Sisyphus
+.sisyphus/
+
 # Temporary files
 .temp/
 tmp/
