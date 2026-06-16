@@ -200,6 +200,7 @@ export const stores = mysqlTable(
       table.storeName
     ),
     userIdx: index("idx_stores_user").on(table.userId),
+    userMpIdx: index("idx_stores_user_mp").on(table.userId, table.marketplace),
   })
 );
 
@@ -247,6 +248,10 @@ export const monthlyUploads = mysqlTable(
       table.userId,
       table.periodYear,
       table.periodMonth
+    ),
+    userUploadedAtIdx: index("idx_mu_user_uploaded_at").on(
+      table.userId,
+      table.uploadedAt
     ),
     uqDedupe: uniqueIndex("uq_mu_dedupe").on(
       table.storeId,

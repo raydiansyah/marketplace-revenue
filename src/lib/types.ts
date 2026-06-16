@@ -393,6 +393,7 @@ export interface MonthlyUploadRecord {
   id: string;
   userId: string;
   storeId: string;
+  storeName: string;
   marketplace: MarketplaceId;
   periodYear: number;
   periodMonth: number;
@@ -409,7 +410,18 @@ export interface MonthlyUploadDetail extends MonthlyUploadRecord {
 }
 
 /** Shape untuk INSERT ke monthly_uploads. */
-export interface MonthlyUploadInsert extends MonthlyUploadRecord {
+export interface MonthlyUploadInsert {
+  id: string;
+  userId: string;
+  storeId: string;
+  marketplace: MarketplaceId;
+  periodYear: number;
+  periodMonth: number;
+  fileType: FileType;
+  fileName: string;
+  rawRowCount: number;
+  checksumSha256: string;
+  uploadedAt?: Date;
   parsedJson: unknown[];
 }
 

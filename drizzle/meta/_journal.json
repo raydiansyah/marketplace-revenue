@@ -15,6 +15,13 @@
       "when": 1779500597897,
       "tag": "0001_fine_molly_hayes",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1780715551316,
+      "tag": "0002_lush_energizer",
+      "breakpoints": true
     }
   ]
 }

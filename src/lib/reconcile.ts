@@ -469,10 +469,13 @@ function reconcileMarketplace(
         const normalizedOrderId = normalizeOrderId(income.orderId);
         if (excludedOrderIds.has(normalizedOrderId)) return false;
 
-        // Khusus Tokopedia/TikTok:
-        // jika order hanya ada di transaksi pendapatan tapi tidak ada di file pesanan,
-        // anggap sebagai order batal agar tidak mempengaruhi total.
-        if (mp === "tokopedia" && !orderMap.has(normalizedOrderId)) {
+        // Jika order tidak ada di file Pesanan Selesai, jangan dihitung.
+        // Tanpa data produk (SKU, nama, qty), HPP tidak bisa dihitung → margin palsu tinggi.
+        // Ini berlaku untuk SEMUA marketplace (Tokopedia, Shopee, Lazada).
+        if (!orderMap.has(normalizedOrderId)) {
+          console.warn(
+            `[reconcile] Order ${normalizedOrderId} (${mp}) ada di income file tapi tidak ditemukan di file pesanan. Dilewati dari laporan.`
+          );
           return false;
         }
 

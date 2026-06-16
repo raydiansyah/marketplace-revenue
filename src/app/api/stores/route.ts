@@ -13,6 +13,8 @@ import { requireSession } from '@/lib/auth/session'
 import { getStores, createStore } from '@/lib/db/queries/stores'
 import type { MarketplaceId, StoreSummary } from '@/lib/types'
 
+export const runtime = 'nodejs'
+
 const VALID_MARKETPLACES: MarketplaceId[] = ['shopee', 'tokopedia', 'lazada']
 
 function isDupEntryError(e: unknown): boolean {
@@ -39,7 +41,14 @@ export async function GET(req: NextRequest) {
     }
 
     const stores = await getStores(session.sub, marketplace ?? undefined)
-    return NextResponse.json({ stores })
+    return NextResponse.json(
+      { stores },
+      {
+        headers: {
+          'Cache-Control': 'private, max-age=60, stale-while-revalidate=120',
+        },
+      },
+    )
   } catch (e) {
     if (e instanceof Response) return e
     console.error('[GET /api/stores]', e)

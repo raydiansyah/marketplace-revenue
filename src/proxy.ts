@@ -1,9 +1,9 @@
 /**
- * Module: Next.js Middleware
+ * Module: Next.js Proxy
  * Purpose: JWT authentication gate for all protected routes + RBAC enforcement
  * Used by: Next.js runtime (runs on every matched request)
  * Dependencies: jwt.ts, cookies.ts, constants.ts
- * Public functions: middleware()
+ * Public functions: proxy()
  * Side effects: Redirects unauthenticated requests; injects x-user-* headers for API routes
  * Phase 6: Tries marketplace-access first; falls back to legacy cookie within grace period
  */
@@ -36,7 +36,7 @@ function isWithinGracePeriod(): boolean {
   return Date.now() < graceUntil.getTime();
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Skip Next.js internals

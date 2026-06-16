@@ -56,6 +56,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "periodMonth harus antara 1–12" }, { status: 400 });
     }
 
+    // ── Calculate 2 previous periods (for cross-month settlement: order in N-2..N-1, settlement in N) ──
+    // Marketplace settlement typically takes 1-2 months, so we fetch order files from the
+    // selected period + 2 prior periods to ensure order details are always available.
+    const getPrev1 = (y: number, m: number): [year: number, month: number] => {
+      if (m === 1) return [y - 1, 12];
+      return [y, m - 1];
+    };
+    const getPrev2 = (y: number, m: number): [year: number, month: number] => {
+      if (m === 1) return [y - 1, 11];
+      if (m === 2) return [y - 1, 12];
+      return [y, m - 2];
+    };
+    const [prev1Year, prev1Month] = getPrev1(periodYear, periodMonth);
+    const [prev2Year, prev2Month] = getPrev2(periodYear, periodMonth);
+
     const db = await getDb();
 
     // Verifikasi store milik user
@@ -72,7 +87,10 @@ export async function POST(req: NextRequest) {
     const marketplace = store.marketplace as MarketplaceId;
 
     // Ambil semua monthly_uploads untuk store+period (single query, no N+1)
-    const uploads = await db
+    // ── Fetch uploads for selected period + 2 previous periods (order files only from prev) ──
+    // Selected period: income + order files (all types)
+    // Previous periods: only order files (handles cross-month settlement: order in N-2..N-1, dana released in N)
+    const currentPeriodUploads = await db
       .select()
       .from(monthlyUploads)
       .where(
@@ -83,6 +101,40 @@ export async function POST(req: NextRequest) {
           eq(monthlyUploads.periodMonth, periodMonth)
         )
       );
+
+    // Batch fetch order files from 2 previous periods in parallel
+    const [prev1OrderUploads, prev2OrderUploads] = await Promise.all([
+      db
+        .select()
+        .from(monthlyUploads)
+        .where(
+          and(
+            eq(monthlyUploads.storeId, storeId),
+            eq(monthlyUploads.userId, session.sub),
+            eq(monthlyUploads.periodYear, prev1Year),
+            eq(monthlyUploads.periodMonth, prev1Month),
+            eq(monthlyUploads.fileType, "order")
+          )
+        ),
+      db
+        .select()
+        .from(monthlyUploads)
+        .where(
+          and(
+            eq(monthlyUploads.storeId, storeId),
+            eq(monthlyUploads.userId, session.sub),
+            eq(monthlyUploads.periodYear, prev2Year),
+            eq(monthlyUploads.periodMonth, prev2Month),
+            eq(monthlyUploads.fileType, "order")
+          )
+        ),
+    ]);
+
+    const uploads = [
+      ...currentPeriodUploads,
+      ...prev1OrderUploads,
+      ...prev2OrderUploads,
+    ];
 
     if (uploads.length === 0) {
       return NextResponse.json(

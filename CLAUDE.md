@@ -70,3 +70,50 @@ TiDB (MySQL-compatible) via Drizzle ORM. Single table: `saved_reports` (`src/lib
 ### Upload Validation
 
 `src/lib/validation/uploadValidator.ts` — validates file structure and detects marketplace format before parsing.
+
+## Context Mode & Performance Rules
+
+### Context Mode (MANDATORY)
+- ALL commands that read/query/analyze → use `ctx_execute` or `ctx_execute_file`
+- Whitelist Bash only for: file mutations, git writes, navigation, process control, package install, echo
+- Web/API fetch → `ctx_fetch_and_index` → `ctx_search`
+- Large file analysis → ctx_execute_file (analyze in sandbox, print summary only)
+- NEVER dump raw large output to context
+
+### TiDB/Drizzle ORM Optimization (CRITICAL)
+- ALWAYS check for N+1 query patterns in Drizzle/SQL code
+- N+1 detection: loop over items + query/access relation per item
+- N+1 fixes:
+  - Eager load: use `innerJoin`, `leftJoin`, or `with()` for relations
+  - Batch: collect IDs → `inArray(ids)` or raw `WHERE id IN (...)`
+  - Aggregate: use `sql<number>` template or Drizzle aggregations
+  - Index: check `EXPLAIN` or query analyzer
+- Use select/projection to avoid overfetch: `.select({id: true, name: true})`
+- Prefer prepared statements for repeated queries
+- Connection pooling: TiDB handles this; ensure query is not held longer than needed
+- Batch inserts/updates: use Drizzle's `.values([])` for bulk operations
+- Avoid `SELECT *` — always narrow columns
+- Cache expensive computations: server-side TTL cache
+
+### File Parsing Optimization
+- CSV/XLSX parsing is CPU-bound → process in server action, not client
+- Large files (>5MB): warn user, consider streaming/chunked parsing
+- Reuse parser instances; avoid re-parsing same file
+- Use `xlsxUtils.ts` for consistent parsing; don't mix parser approaches
+
+### Ask When Ambiguous
+- Requirements unclear → ask user first
+- DB migration impact → ask before proceeding
+- Breaking changes → ask before proceeding
+- Don't guess, don't assume
+
+### Todo Tracking (MANDATORY)
+- Multi-step tasks → create todo list
+- Mark in_progress when starting
+- Mark completed when done
+- Use blockedBy for dependencies
+
+### MCP & Subagent
+- Use MCP tools when available (Context7, etc.)
+- Delegate complex work to subagents: researcher, planner, reviewer, coder, tester
+- Use skill injection: supabase, backend-testing, laravel-specialist

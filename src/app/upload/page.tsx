@@ -396,6 +396,7 @@ function Step2({
       formData.append("periodYear", String(periodYear));
       formData.append("periodMonth", String(periodMonth));
       formData.append("fileType", fileType);
+      formData.append("replace", "true");
 
       const res = await fetch("/api/monthly-uploads", {
         method: "POST",
