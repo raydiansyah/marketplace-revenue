@@ -1,8 +1,8 @@
 /**
  * Module: HPP Page
- * Purpose: Halaman manajemen HPP — tabbed per marketplace dengan combined view
+ * Purpose: Halaman manajemen HPP — import master Excel, berlaku semua marketplace
  * Used by: AppSidebar navigation
- * Dependencies: HppManagerTabbed, AuthAreaLayout
+ * Dependencies: HppMasterManager, AuthAreaLayout
  * Public functions: HppPage (default export)
  * Side effects: none
  */
@@ -10,7 +10,7 @@
 "use client";
 
 import AuthAreaLayout from "@/components/AuthAreaLayout";
-import HppManagerTabbed from "@/components/HppManagerTabbed";
+import HppMasterManager from "@/components/HppMasterManager";
 
 export default function HppPage() {
 	return (
@@ -18,15 +18,16 @@ export default function HppPage() {
 			<div className="mx-auto w-full max-w-[1320px] space-y-5">
 				<div className="panel-card p-5">
 					<h1 className="text-3xl font-extrabold tracking-tight text-foreground">
-						Manajemen HPP
+						HPP Master
 					</h1>
 					<p className="text-muted-foreground mt-1 text-sm">
-						Kelola data HPP per marketplace. Tab Gabungan menampilkan view
-						terpadu dan deteksi konflik harga.
+						Import file Excel master produk. HPP berlaku untuk semua marketplace sekaligus.
 					</p>
 				</div>
 
-				<HppManagerTabbed />
+				<div className="panel-card p-5">
+					<HppMasterManager />
+				</div>
 			</div>
 		</AuthAreaLayout>
 	);
