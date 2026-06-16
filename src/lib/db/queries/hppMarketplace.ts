@@ -1,11 +1,12 @@
 /**
  * Module: HPP Marketplace Queries
- * Purpose: DB query functions for hpp_marketplace_entries table
+ * Purpose: DB query functions for hpp_marketplace_entries table (legacy per-marketplace entries)
  * Used by: src/app/api/hpp/marketplace/route.ts, src/app/api/hpp/marketplace/[id]/route.ts, src/lib/hpp/combined.ts
  * Dependencies: drizzle-orm, src/lib/db/client, src/lib/db/schema
  * Public functions: listHppMarketplace(), getHppMarketplaceById(), replaceHppMarketplace(),
  *                   insertHppMarketplace(), updateHppMarketplace(), deleteHppMarketplace()
  * Side effects: DB reads/writes to hpp_marketplace_entries
+ * Note: marketplace column is now nullable (NULL = global master). rowToEntry fallback: null → "shopee"
  */
 
 import { eq, and } from "drizzle-orm";
@@ -20,7 +21,7 @@ function rowToEntry(row: typeof hppMarketplaceEntries.$inferSelect): HppMarketpl
   return {
     id: row.id,
     userId: row.userId,
-    marketplace: row.marketplace as MarketplaceId,
+    marketplace: (row.marketplace ?? "shopee") as MarketplaceId,
     sku: row.sku,
     productName: row.productName,
     masterSku: row.masterSku ?? undefined,
