@@ -870,3 +870,92 @@ export function generateReportFromSets(
     hppSnapshot: hppEntries.length > 0 ? [...hppEntries] : undefined,
   };
 }
+
+// ──────────────────────────────────────────────────────────────
+// Recompute HPP on an EXISTING report (saved-report mode)
+//
+// Dipakai saat user me-mapping HPP dari halaman hasil sementara
+// `uploadSets` kosong (laporan dibuka dari /reports/[id], bukan dari
+// upload mentah). Hanya field turunan-HPP yang dihitung ulang
+// (hpp, grossProfit, netProfit, margin). Revenue & fee platform —
+// yang sudah final dari settlement — dipertahankan apa adanya.
+// ──────────────────────────────────────────────────────────────
+export function recomputeReportHpp(
+  report: RevenueReport,
+  hppEntries: HppEntry[]
+): RevenueReport {
+  const ordersByMarketplace = new Map<MarketplaceId, CalculatedOrder[]>();
+
+  const recomputedOrders: CalculatedOrder[] = report.orders.map((order) => {
+    // Settlement amount adalah sumber kebenaran net profit (sama seperti reconcileMarketplace):
+    // jika ada settlement → netProfit = settlementAmount - hpp, bukan grossProfit - fee.
+    // Tanpa ini, semua order ber-settlement akan bergeser jauh nilainya saat HPP di-recompute.
+    const settlementAmount = order.settlementAmount ?? 0;
+
+    // Multi-SKU: hitung ulang per line item bila tersedia, lalu jumlahkan.
+    let totalHpp: number;
+    let lineItems = order.lineItems;
+
+    if (order.lineItems && order.lineItems.length > 0) {
+      lineItems = order.lineItems.map((line) => {
+        const lineHpp = lookupHpp(line.sku, line.productName, hppEntries) * Math.max(0, line.qty || 0);
+        const lineGross = line.revenue - lineHpp;
+        // Ratio alokasi line dari revenue order, dipakai untuk membagi settlement.
+        const ratio = order.revenue > 0 ? line.revenue / order.revenue : 0;
+        const lineNet =
+          settlementAmount !== 0
+            ? settlementAmount * ratio - lineHpp
+            : lineGross - line.platformFee;
+        return {
+          ...line,
+          hpp: lineHpp,
+          grossProfit: lineGross,
+          netProfit: lineNet,
+          grossMargin: line.revenue > 0 ? (lineGross / line.revenue) * 100 : 0,
+          netMargin: line.revenue > 0 ? (lineNet / line.revenue) * 100 : 0,
+        };
+      });
+      totalHpp = lineItems.reduce((sum, line) => sum + line.hpp, 0);
+    } else {
+      totalHpp = lookupHpp(order.sku, order.productName, hppEntries) * Math.max(0, order.qty || 0);
+    }
+
+    const grossProfit = order.revenue - totalHpp;
+    const netProfit =
+      settlementAmount !== 0
+        ? settlementAmount - totalHpp
+        : grossProfit - order.fees.totalPlatformFee;
+    const recomputed: CalculatedOrder = {
+      ...order,
+      hpp: totalHpp,
+      grossProfit,
+      netProfit,
+      grossMargin: order.revenue > 0 ? (grossProfit / order.revenue) * 100 : 0,
+      netMargin: order.revenue > 0 ? (netProfit / order.revenue) * 100 : 0,
+      lineItems,
+    };
+
+    const bucket = ordersByMarketplace.get(order.marketplace) ?? [];
+    bucket.push(recomputed);
+    ordersByMarketplace.set(order.marketplace, bucket);
+    return recomputed;
+  });
+
+  // Rebuild summary hanya untuk marketplace yang sudah ada di report,
+  // mempertahankan urutan asli.
+  const marketplaces: MarketplaceSummary[] = report.marketplaces.map((existing) =>
+    buildSummary(existing.marketplace, ordersByMarketplace.get(existing.marketplace) ?? [])
+  );
+
+  return {
+    ...report,
+    marketplaces,
+    totalRevenue: marketplaces.reduce((s, m) => s + m.totalRevenue, 0),
+    totalHpp: marketplaces.reduce((s, m) => s + m.totalHpp, 0),
+    totalGrossProfit: marketplaces.reduce((s, m) => s + m.totalGrossProfit, 0),
+    totalPlatformFees: marketplaces.reduce((s, m) => s + m.totalPlatformFees, 0),
+    totalNetProfit: marketplaces.reduce((s, m) => s + m.totalNetProfit, 0),
+    orders: recomputedOrders,
+    hppSnapshot: hppEntries.length > 0 ? [...hppEntries] : undefined,
+  };
+}

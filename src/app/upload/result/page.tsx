@@ -2,9 +2,10 @@
  * Module: Upload Result Page
  * Purpose: Menampilkan hasil rekonsiliasi upload (order, fee, HPP, net profit) beserta modal detail pesanan.
  * Used by: Route `/upload/result` melalui Next.js App Router.
- * Dependencies: useAppStore (state upload/report), generateReportFromSets(), komponen chart, formatter util.
- * Public functions: UploadResultPage(), helper kalkulasi lokal untuk sorting, lookup SKU, dan ringkasan modal.
+ * Dependencies: useAppStore (state upload/report), generateReportFromSets() + recomputeReportHpp(), chart (lazy via next/dynamic), formatter util.
+ * Public functions: UploadResultPage(), OrderCard (kartu mobile), SortHeader, MetricCard, helper kalkulasi lokal.
  * Side effects: Update store laporan/HPP, simpan laporan, sinkronisasi report tersimpan, copy order ID ke clipboard.
+ * Catatan: recomputeAfterHppChange() memilih recompute penuh (uploadSets ada) vs recompute-HPP dari report (saved-report) agar tidak blank.
  */
 "use client";
 
@@ -25,10 +26,24 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import AuthAreaLayout from "@/components/AuthAreaLayout";
-import RevenueBarChart from "@/components/charts/RevenueBarChart";
-import FeePieChart from "@/components/charts/FeePieChart";
-import { generateReportFromSets } from "@/lib/reconcile";
+import { generateReportFromSets, recomputeReportHpp } from "@/lib/reconcile";
+
+// Lazy-load chart (recharts) — pangkas bundle awal halaman & percepat load nav.
+const ChartFallback = () => (
+  <div className="flex h-[280px] items-center justify-center">
+    <Loader2 className="h-5 w-5 animate-spin text-[var(--text-subtle)]" />
+  </div>
+);
+const RevenueBarChart = dynamic(() => import("@/components/charts/RevenueBarChart"), {
+  ssr: false,
+  loading: ChartFallback,
+});
+const FeePieChart = dynamic(() => import("@/components/charts/FeePieChart"), {
+  ssr: false,
+  loading: ChartFallback,
+});
 import { useAppStore } from "@/store/app-store";
 import { useNotification } from "@/lib/notifications/notification-context";
 import {
@@ -105,9 +120,10 @@ function decorateOrderWithHppMeta(order: CalculatedOrder, hppEntries: HppEntry[]
     };
   }
 
-  const matchedEntry = hppEntries.find(
-    (entry) => entry.cost > 0 && entryHasSkuAlias(entry, normalizedOrderSku)
-  );
+  // Exact SKU match otoritatif termasuk cost 0 — agar mapping eksplisit ke master
+  // HPP 0 tetap ditandai "Matched" dan Master SKU-nya ikut berubah.
+  const skuMatches = hppEntries.filter((entry) => entryHasSkuAlias(entry, normalizedOrderSku));
+  const matchedEntry = skuMatches.find((entry) => entry.cost > 0) ?? skuMatches[0] ?? null;
 
   return {
     ...order,
@@ -245,16 +261,20 @@ function lookupHppMatchForLine(sku: string, productName: string, hppEntries: Hpp
   const normalizedSku = normalizeSkuKey(sku);
   const normalizedProductName = normalizeName(productName);
 
+  // Exact SKU/alias match otoritatif (menang atas name match), termasuk cost 0.
+  // Lihat catatan di lookupHpp() — mapping eksplisit ke master HPP 0 harus dihormati.
   if (normalizedSku) {
-    const bySku = hppEntries.find((entry) => {
-      if (entry.cost <= 0) return false;
+    const skuMatches = hppEntries.filter((entry) => {
       const aliases = new Set<string>([
         ...splitSkuAliases(entry.sku),
         ...splitSkuAliases(entry.masterSku || ""),
       ]);
       return aliases.has(normalizedSku);
     });
-    if (bySku) return { cost: bySku.cost, matchedEntry: bySku };
+    if (skuMatches.length > 0) {
+      const chosen = skuMatches.find((entry) => entry.cost > 0) ?? skuMatches[0];
+      return { cost: chosen.cost, matchedEntry: chosen };
+    }
   }
 
   const scored = hppEntries
@@ -372,6 +392,30 @@ export default function UploadResultPage() {
   const syncSavedReportIfNeeded = async (report: RevenueReport) => {
     if (reportSource !== "saved" || !activeSavedReportId) return true;
     return updateSavedReportContent(activeSavedReportId, report);
+  };
+
+  // Hitung ulang report setelah HPP berubah.
+  // - Mode "computed" (ada uploadSets mentah): hitung penuh dari sets.
+  // - Mode "saved" (uploadSets kosong): recompute HPP dari orders report yang ada,
+  //   sehingga revenue & fee yang sudah final tidak hilang dan layar tidak blank.
+  const recomputeAfterHppChange = (persistedEntries: HppEntry[]): RevenueReport | null => {
+    const hasRawSets = Object.values(uploadSets).some(
+      (set) => (set?.orderFiles?.length ?? 0) > 0 || (set?.incomeFile?.transactions?.length ?? 0) > 0
+    );
+
+    if (hasRawSets) {
+      const next = generateReportFromSets(uploadSets, persistedEntries, configs);
+      // Guard: jangan timpa report bagus dengan hasil kosong.
+      if (next.orders.length === 0 && (uploadPreviewReport?.orders.length ?? 0) > 0) {
+        return uploadPreviewReport ? recomputeReportHpp(uploadPreviewReport, persistedEntries) : null;
+      }
+      return next;
+    }
+
+    if (uploadPreviewReport) {
+      return recomputeReportHpp(uploadPreviewReport, persistedEntries);
+    }
+    return null;
   };
 
   const orderSequenceMap = useMemo(() => {
@@ -523,7 +567,10 @@ export default function UploadResultPage() {
     );
   }, [sortedOrders]);
 
-  const unmatchedCount = useMemo(() => sortedOrders.filter((order) => order.hpp <= 0).length, [sortedOrders]);
+  const unmatchedCount = useMemo(
+    () => sortedOrders.filter((order) => order.hpp <= 0 && !order.hppMatched).length,
+    [sortedOrders]
+  );
 
   const totalPages = useMemo(() => {
     if (rowsPerPage === "all") return 1;
@@ -698,6 +745,19 @@ export default function UploadResultPage() {
     return [fallback];
   }, [selectedOrder, uploadSets]);
 
+  // Apakah modal punya line item asli dari uploadSets (mode upload mentah)?
+  // Mode "saved" (uploadSets kosong) → modal jadi view murni dari order yang
+  // sudah di-recompute, bukan menghitung ulang dari fallback (agar konsisten
+  // dengan tabel & harga modal ikut berubah setelah mapping).
+  const hasRealOrderLines = useMemo(() => {
+    if (!selectedOrder) return false;
+    const set = uploadSets[selectedOrder.marketplace];
+    const normalized = normalizeOrderId(selectedOrder.orderId);
+    return (set?.orderFiles ?? [])
+      .flatMap((file) => file.rawOrders)
+      .some((row) => normalizeOrderId(row.orderId) === normalized);
+  }, [selectedOrder, uploadSets]);
+
   const modalSummary = useMemo(() => {
     if (!selectedOrder) {
       return {
@@ -708,6 +768,24 @@ export default function UploadResultPage() {
         totalPlatformFee: 0,
         settlementAdjustment: 0,
         totalNetProfit: 0,
+      };
+    }
+
+    // Saved-report mode: tampilkan nilai order yang sudah di-recompute apa adanya.
+    if (!hasRealOrderLines) {
+      const settlementAmount = selectedOrder.settlementAmount ?? 0;
+      const settlementAdjustment =
+        settlementAmount !== 0
+          ? settlementAmount - (selectedOrder.revenue - selectedOrder.fees.totalPlatformFee)
+          : 0;
+      return {
+        totalQty: selectedOrder.qty,
+        totalRevenue: selectedOrder.revenue,
+        totalHpp: selectedOrder.hpp,
+        totalGrossProfit: selectedOrder.grossProfit,
+        totalPlatformFee: selectedOrder.fees.totalPlatformFee,
+        settlementAdjustment,
+        totalNetProfit: selectedOrder.netProfit,
       };
     }
 
@@ -747,7 +825,7 @@ export default function UploadResultPage() {
       settlementAdjustment,
       totalNetProfit,
     };
-  }, [selectedOrder, selectedOrderLines, hppEntries]);
+  }, [selectedOrder, selectedOrderLines, hppEntries, hasRealOrderLines]);
 
   const selectedOrderSkuBreakdowns = useMemo(() => {
     if (!selectedOrder || selectedOrderLines.length === 0) return [] as Array<{
@@ -765,6 +843,51 @@ export default function UploadResultPage() {
       masterSkus: string[];
       products: string[];
     }>;
+
+    // Saved-report mode: turunkan breakdown dari lineItems order (sudah di-recompute),
+    // atau satu baris ringkas dari order bila tidak ada lineItems. Tidak menghitung
+    // ulang dari fallback agar harga ikut berubah setelah mapping & konsisten dgn tabel.
+    if (!hasRealOrderLines) {
+      const settlementAmount = selectedOrder.settlementAmount ?? 0;
+      const baseLines =
+        selectedOrder.lineItems && selectedOrder.lineItems.length > 0
+          ? selectedOrder.lineItems
+          : [
+              {
+                sku: selectedOrder.sku || "-",
+                productName: selectedOrder.productName,
+                qty: selectedOrder.qty,
+                revenue: selectedOrder.revenue,
+                hpp: selectedOrder.hpp,
+                platformFee: selectedOrder.fees.totalPlatformFee,
+                grossProfit: selectedOrder.grossProfit,
+                netProfit: selectedOrder.netProfit,
+                grossMargin: selectedOrder.grossMargin,
+                netMargin: selectedOrder.netMargin,
+              },
+            ];
+      return baseLines.map((line) => {
+        const match = lookupHppMatchForLine(line.sku, line.productName, hppEntries);
+        const masterSku = (match.matchedEntry?.masterSku || match.matchedEntry?.sku || "").trim();
+        const allocatedAdjustment =
+          settlementAmount !== 0 ? line.netProfit - (line.grossProfit - line.platformFee) : 0;
+        return {
+          sku: line.sku || "-",
+          qty: line.qty,
+          allocatedRevenue: line.revenue,
+          allocatedFee: line.platformFee,
+          allocatedAdjustment,
+          hpp: line.hpp,
+          hppUnitAvg: line.qty > 0 ? line.hpp / line.qty : 0,
+          grossProfit: line.grossProfit,
+          grossMargin: line.grossMargin,
+          netProfit: line.netProfit,
+          netMargin: line.netMargin,
+          masterSkus: masterSku ? [masterSku] : [],
+          products: [line.productName],
+        };
+      });
+    }
 
     const totalRevenueFromLines = selectedOrderLines.reduce(
       (sum, line) => sum + Math.max(0, (line.actualPrice || 0) * line.qty),
@@ -869,7 +992,7 @@ export default function UploadResultPage() {
         products: Array.from(group.products),
       };
     });
-  }, [selectedOrder, selectedOrderLines, hppEntries]);
+  }, [selectedOrder, selectedOrderLines, hppEntries, hasRealOrderLines]);
 
   const masterHppOptions = useMemo(() => {
     const map = new Map<string, {
@@ -988,13 +1111,11 @@ export default function UploadResultPage() {
 
     const targetSkuRaw = String(hppMapTarget.sku ?? "").trim();
     const isMultiSkuTarget = normalizeSkuKey(targetSkuRaw) === "multisku";
+    // Untuk multi-SKU: coba ambil SKU dari uploadSets; kalau kosong (saved report), fallback ke
+    // product-name mapping (effectiveSku = "" → flow else di bawah).
     const effectiveSku = isMultiSkuTarget
       ? String(mapTargetSkuOptions.find((item) => String(item.sku || "").trim())?.sku ?? "").trim()
       : targetSkuRaw;
-    if (!effectiveSku && isMultiSkuTarget) {
-      setHppMapperError("SKU target tidak ditemukan. Buka detail order lalu pilih HPP per SKU.");
-      return;
-    }
 
     const selectedSkuMeta = mapTargetSkuOptions.find((item) => item.sku === effectiveSku);
     const targetProductName = String(
@@ -1067,19 +1188,21 @@ export default function UploadResultPage() {
     }
 
     const persistedEntries = useAppStore.getState().hppEntries;
-    const nextReport = generateReportFromSets(uploadSets, persistedEntries, configs);
-    setUploadPreviewReport(nextReport);
-    const reportSaved = await syncSavedReportIfNeeded(nextReport);
-    if (!reportSaved) {
-      notify("warning", "Mapping HPP diterapkan, tetapi gagal update laporan tersimpan.");
-    }
-    if (selectedOrder) {
-      const refreshed = nextReport.orders.find(
-        (order) =>
-          order.marketplace === selectedOrder.marketplace &&
-          normalizeOrderId(order.orderId) === normalizeOrderId(selectedOrder.orderId)
-      );
-      if (refreshed) setSelectedOrder(decorateOrderWithHppMeta(refreshed, persistedEntries));
+    const nextReport = recomputeAfterHppChange(persistedEntries);
+    if (nextReport) {
+      setUploadPreviewReport(nextReport);
+      const reportSaved = await syncSavedReportIfNeeded(nextReport);
+      if (!reportSaved) {
+        notify("warning", "Mapping HPP diterapkan, tetapi gagal update laporan tersimpan.");
+      }
+      if (selectedOrder) {
+        const refreshed = nextReport.orders.find(
+          (order) =>
+            order.marketplace === selectedOrder.marketplace &&
+            normalizeOrderId(order.orderId) === normalizeOrderId(selectedOrder.orderId)
+        );
+        if (refreshed) setSelectedOrder(decorateOrderWithHppMeta(refreshed, persistedEntries));
+      }
     }
     setHppMapTarget(null);
     setHppMapperError(null);
@@ -1128,20 +1251,22 @@ export default function UploadResultPage() {
     }
 
     const persistedEntries = useAppStore.getState().hppEntries;
-    const nextReport = generateReportFromSets(uploadSets, persistedEntries, configs);
-    setUploadPreviewReport(nextReport);
-    const reportSaved = await syncSavedReportIfNeeded(nextReport);
-    if (!reportSaved) {
-      notify("warning", "HPP berhasil dihapus, tetapi gagal update laporan tersimpan.");
-    }
+    const nextReport = recomputeAfterHppChange(persistedEntries);
+    if (nextReport) {
+      setUploadPreviewReport(nextReport);
+      const reportSaved = await syncSavedReportIfNeeded(nextReport);
+      if (!reportSaved) {
+        notify("warning", "HPP berhasil dihapus, tetapi gagal update laporan tersimpan.");
+      }
 
-    if (selectedOrder) {
-      const refreshed = nextReport.orders.find(
-        (order) =>
-          order.marketplace === selectedOrder.marketplace &&
-          normalizeOrderId(order.orderId) === normalizeOrderId(selectedOrder.orderId)
-      );
-      if (refreshed) setSelectedOrder(decorateOrderWithHppMeta(refreshed, persistedEntries));
+      if (selectedOrder) {
+        const refreshed = nextReport.orders.find(
+          (order) =>
+            order.marketplace === selectedOrder.marketplace &&
+            normalizeOrderId(order.orderId) === normalizeOrderId(selectedOrder.orderId)
+        );
+        if (refreshed) setSelectedOrder(decorateOrderWithHppMeta(refreshed, persistedEntries));
+      }
     }
     notify("success", "Mapping HPP berhasil dihapus.");
   };
@@ -1352,7 +1477,47 @@ export default function UploadResultPage() {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Mobile: kartu per pesanan (lg:hidden) */}
+          <div className="space-y-3 px-4 py-4 lg:hidden">
+            {pagedOrders.map((order, idx) => {
+              const sequence = rowsPerPage === "all" ? idx + 1 : (page - 1) * Number(rowsPerPage) + idx + 1;
+              const unmatched = order.hpp <= 0 && !order.hppMatched;
+              const skuCount =
+                orderSkuCountMap.get(`${order.marketplace}:${normalizeOrderId(order.orderId)}`) ?? 1;
+              const returnQty =
+                returnQtyBadgeMap.get(`${order.marketplace}:${normalizeOrderId(order.orderId)}`) ?? 0;
+              const isMultiSku = skuCount > 1;
+              return (
+                <OrderCard
+                  key={`m-${order.marketplace}:${order.orderId}:${idx}`}
+                  order={order}
+                  sequence={sequence}
+                  unmatched={unmatched}
+                  isMultiSku={isMultiSku}
+                  returnQty={returnQty}
+                  copiedOrderId={copiedOrderId}
+                  onCopy={() => void handleCopyOrderId(order.orderId)}
+                  onDetail={() => setSelectedOrder(order)}
+                  onPickHpp={() => {
+                    if (isMultiSku) {
+                      setSelectedOrder(order);
+                      return;
+                    }
+                    openHppMapper(order);
+                  }}
+                  onDelete={() => handleDeleteOrder(order)}
+                />
+              );
+            })}
+            {pagedOrders.length === 0 && (
+              <p className="rounded-2xl border border-dashed border-[var(--border-subtle)] px-4 py-8 text-center text-sm text-[var(--text-subtle)]">
+                Tidak ada order yang cocok dengan filter.
+              </p>
+            )}
+          </div>
+
+          {/* Desktop: tabel lengkap (hidden di mobile) */}
+          <div className="hidden overflow-x-auto lg:block">
             <table className="w-full min-w-[1720px] text-xs">
               <thead>
                 <tr className="border-b border-[var(--border-subtle)] bg-[var(--surface-muted)]">
@@ -1376,7 +1541,7 @@ export default function UploadResultPage() {
               <tbody className="divide-y divide-[var(--border-subtle)]">
                 {pagedOrders.map((order, idx) => {
                   const sequence = rowsPerPage === "all" ? idx + 1 : (page - 1) * Number(rowsPerPage) + idx + 1;
-                  const unmatched = order.hpp <= 0;
+                  const unmatched = order.hpp <= 0 && !order.hppMatched;
                   const skuCount =
                     orderSkuCountMap.get(`${order.marketplace}:${normalizeOrderId(order.orderId)}`) ?? 1;
                   const returnQty =
@@ -1531,8 +1696,8 @@ export default function UploadResultPage() {
       </div>
 
       {selectedOrder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm" onClick={() => setSelectedOrder(null)}>
-          <div className="w-full max-w-4xl rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface)] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/45 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setSelectedOrder(null)}>
+          <div className="max-h-[92vh] w-full max-w-4xl overflow-hidden rounded-t-2xl border border-[var(--border-subtle)] bg-[var(--surface)] shadow-2xl sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="rounded-t-2xl border-b border-[var(--border-subtle)] bg-[var(--surface-soft)] px-5 py-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -1615,7 +1780,7 @@ export default function UploadResultPage() {
                 <p className="mb-2 text-xs font-semibold text-[var(--text-subtle)]">Detail Profit Per SKU (Revenue, HPP, Fee, Net)</p>
                 <div className="space-y-2">
                   {selectedOrderSkuBreakdowns.map((skuDetail, index) => {
-                    const notMapped = skuDetail.hpp <= 0;
+                    const notMapped = skuDetail.hpp <= 0 && skuDetail.masterSkus.length === 0;
                     return (
                       <details
                         key={`${selectedOrder.orderId}-${skuDetail.sku}-${index}`}
@@ -1696,8 +1861,8 @@ export default function UploadResultPage() {
       )}
 
       {hppMapTarget && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm" onClick={() => setHppMapTarget(null)}>
-          <div className="w-full max-w-2xl rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface)] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-900/45 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setHppMapTarget(null)}>
+          <div className="max-h-[92vh] w-full max-w-2xl overflow-hidden rounded-t-2xl border border-[var(--border-subtle)] bg-[var(--surface)] shadow-2xl sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between rounded-t-2xl border-b border-[var(--border-subtle)] bg-[var(--surface-soft)] px-5 py-4">
               <div>
                 <h3 className="text-base font-semibold text-[var(--text)]">Pilih Master HPP</h3>
@@ -1853,8 +2018,128 @@ function MetricCard({
   return (
     <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface)]/95 p-4">
       <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">{label}</p>
-      <p className={`mt-1 text-2xl font-bold ${color}`}>{value}</p>
+      <p className={`mt-1 text-xl font-bold sm:text-2xl ${color}`}>{value}</p>
       {sub && <p className="mt-0.5 text-xs text-[var(--text-subtle)]">{sub}</p>}
+    </div>
+  );
+}
+
+function OrderCard({
+  order,
+  sequence,
+  unmatched,
+  isMultiSku,
+  returnQty,
+  copiedOrderId,
+  onCopy,
+  onDetail,
+  onPickHpp,
+  onDelete,
+}: {
+  order: EnrichedOrder;
+  sequence: number;
+  unmatched: boolean;
+  isMultiSku: boolean;
+  returnQty: number;
+  copiedOrderId: string | null;
+  onCopy: () => void;
+  onDetail: () => void;
+  onPickHpp: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface)] p-3.5 shadow-sm">
+      {/* Header row: order id + status */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold text-[var(--text-subtle)]">#{sequence}</span>
+            <span className="truncate font-mono text-xs font-medium text-[var(--foreground)]">{order.orderId}</span>
+            <button
+              type="button"
+              onClick={onCopy}
+              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-[var(--border-subtle)] text-[var(--text-subtle)]"
+              title="Copy order ID"
+            >
+              {copiedOrderId === order.orderId ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+            </button>
+          </div>
+          <p className="mt-1 line-clamp-2 text-sm text-[var(--foreground)]">{order.productName}</p>
+          <p className="mt-0.5 text-[11px] text-[var(--text-subtle)]">
+            {MARKETPLACE_LABELS[order.marketplace]} • {order.orderDate}
+          </p>
+        </div>
+        {unmatched ? (
+          <span className="shrink-0 rounded-full border border-rose-400/40 bg-rose-400/15 px-2 py-0.5 text-[10px] font-semibold text-rose-300">Unmatched</span>
+        ) : (
+          <span className="shrink-0 rounded-full border border-emerald-400/40 bg-emerald-400/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">Matched</span>
+        )}
+      </div>
+
+      {/* Badges */}
+      {(isMultiSku || returnQty > 0 || (order.sku && order.sku !== "-")) && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {order.sku && order.sku !== "-" && (
+            <span className="rounded-md bg-[var(--surface-muted)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-subtle)]">{order.sku}</span>
+          )}
+          {isMultiSku && (
+            <span className="rounded-full border border-cyan-300/40 bg-cyan-300/15 px-2 py-0.5 text-[10px] font-semibold text-cyan-200">{order.matchedMasterSku !== "-" ? order.matchedMasterSku : "Multi"} SKU</span>
+          )}
+          {returnQty > 0 && (
+            <span className="rounded-full border border-orange-300/40 bg-orange-300/15 px-2 py-0.5 text-[10px] font-semibold text-orange-200">Retur {formatNumber(returnQty)}</span>
+          )}
+        </div>
+      )}
+
+      {/* Financials grid */}
+      <div className="mt-3 grid grid-cols-2 gap-2 rounded-xl bg-[var(--surface-muted)]/50 p-2.5 text-xs">
+        <div>
+          <p className="text-[10px] text-[var(--text-subtle)]">Revenue</p>
+          <p className="font-medium text-[var(--foreground)]">{formatRupiah(order.revenue)}</p>
+        </div>
+        <div>
+          <p className="text-[10px] text-[var(--text-subtle)]">HPP</p>
+          <p className="font-medium text-cyan-300">{formatRupiah(order.hpp)}</p>
+        </div>
+        <div>
+          <p className="text-[10px] text-[var(--text-subtle)]">Biaya Platform</p>
+          <p className="font-medium text-red-400">-{formatRupiah(order.fees.totalPlatformFee)}</p>
+        </div>
+        <div>
+          <p className="text-[10px] text-[var(--text-subtle)]">Net Profit</p>
+          <p className={`font-semibold ${order.netProfit >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+            {formatRupiah(order.netProfit)} <span className="text-[10px] font-normal">({formatPercent(order.netMargin)})</span>
+          </p>
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onDetail}
+          className="flex-1 rounded-lg border border-[var(--border-subtle)] py-2 text-xs font-semibold text-[var(--foreground)] hover:bg-[var(--surface-soft)]"
+        >
+          Detail
+        </button>
+        {unmatched && (
+          <button
+            type="button"
+            onClick={onPickHpp}
+            className="flex-1 rounded-lg border border-amber-300/40 bg-amber-300/15 py-2 text-xs font-semibold text-amber-200 hover:bg-amber-300/25"
+          >
+            {isMultiSku ? "Pilih per SKU" : "Pilih HPP"}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onDelete}
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20"
+          title="Hapus pesanan ini dari laporan"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
     </div>
   );
 }

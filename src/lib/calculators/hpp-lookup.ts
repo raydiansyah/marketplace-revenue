@@ -43,16 +43,22 @@ export function lookupHpp(sku: string, productName: string, hppEntries: HppEntry
   const normalizedSku = normalizeSku(sku);
   const normalizedProductName = normalizeName(productName);
 
+  // Exact SKU/alias match bersifat otoritatif — menang atas fuzzy name match,
+  // termasuk bila cost-nya 0 (mis. produk gratis/packing yang sengaja di-map ke
+  // master HPP 0). Tanpa ini, mapping eksplisit ke master cost 0 akan diabaikan
+  // dan jatuh ke name match yang menemukan master lain ber-cost.
   if (normalizedSku) {
-    const bySkuExact = hppEntries.find((e) => {
-      if (e.cost <= 0) return false;
+    const skuMatches = hppEntries.filter((e) => {
       const aliases = new Set<string>([
         ...splitSkuAliases(e.sku),
         ...splitSkuAliases(e.masterSku || ""),
       ]);
       return aliases.has(normalizedSku);
     });
-    if (bySkuExact) return bySkuExact.cost;
+    if (skuMatches.length > 0) {
+      const chosen = skuMatches.find((e) => e.cost > 0) ?? skuMatches[0];
+      return chosen.cost;
+    }
   }
 
   if (!normalizedProductName) return 0;

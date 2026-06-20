@@ -1,9 +1,9 @@
 /**
- * Module: HPP Master API — GET + POST
- * Purpose: List and import HPP master entries (marketplace-agnostic, marketplace IS NULL)
- * Used by: src/components/HppMasterManager.tsx, src/store/app-store.ts (loadHpp)
+ * Module: HPP Master API — GET + POST + PUT
+ * Purpose: List, import, and programmatically replace HPP master entries (marketplace IS NULL)
+ * Used by: src/components/HppMasterManager.tsx, src/store/app-store.ts (loadHpp, replaceHppEntriesAndSync)
  * Dependencies: hppMaster queries, hppValidator, productMaster parser, requireSession
- * Public functions: GET (?page&limit&q), POST (multipart file import)
+ * Public functions: GET (?page&limit&q), POST (multipart file import), PUT ({ entries: HppEntry[] })
  * Side effects: DB reads/writes to hpp_marketplace_entries (marketplace IS NULL)
  */
 
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     const session = await requireSession();
     const { searchParams } = new URL(req.url);
     const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
-    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") ?? "20", 10)));
+    const limit = Math.min(2000, Math.max(1, parseInt(searchParams.get("limit") ?? "20", 10)));
     const q = (searchParams.get("q") ?? "").trim().toLowerCase();
 
     let entries = await listHppMaster(session.sub);
@@ -105,6 +105,37 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     if (e instanceof Response) return e;
     console.error("[POST /api/hpp/master]", e);
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
+  }
+}
+
+export async function PUT(req: NextRequest) {
+  try {
+    const session = await requireSession();
+    const body = await req.json() as { entries?: unknown };
+    const raw = body?.entries;
+
+    if (!Array.isArray(raw)) {
+      return NextResponse.json({ error: "entries harus berupa array" }, { status: 400 });
+    }
+
+    const entries = (raw as Record<string, unknown>[]).map((e) => ({
+      sku: typeof e.sku === "string" ? e.sku : "",
+      productName: typeof e.productName === "string" ? e.productName : "",
+      cost: typeof e.cost === "number" ? e.cost : 0,
+      masterSku: typeof e.masterSku === "string" ? e.masterSku : undefined,
+      masterProductName: typeof e.masterProductName === "string" ? e.masterProductName : undefined,
+    }));
+
+    const valid = entries.filter(
+      (e) => e.productName.trim() !== "" && Number.isFinite(e.cost) && e.cost >= 0
+    );
+
+    await replaceHppMaster(session.sub, valid);
+    return NextResponse.json({ ok: true, count: valid.length });
+  } catch (e) {
+    if (e instanceof Response) return e;
+    console.error("[PUT /api/hpp/master]", e);
     return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }

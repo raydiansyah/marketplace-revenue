@@ -239,7 +239,7 @@ export const useAppStore = create<AppStore>()((set, get) => ({
   loadHpp: async () => {
     set({ hppLoading: true, hppError: null });
     try {
-      const res = await fetch("/api/hpp/master?limit=500");
+      const res = await fetch("/api/hpp/master?limit=2000");
       if (res.ok) {
         const data = await res.json();
         const hppEntries: HppEntry[] = (data.entries ?? []).map((e: {
@@ -253,6 +253,9 @@ export const useAppStore = create<AppStore>()((set, get) => ({
           cost: e.cost,
         }));
         set({ hppEntries, hppError: null });
+      } else if (res.status === 401) {
+        // Sesi expired/belum tersedia — silent, jangan tampilkan error ke user
+        set({ hppError: null });
       } else {
         throw new Error(`HTTP ${res.status}`);
       }
@@ -308,15 +311,22 @@ export const useAppStore = create<AppStore>()((set, get) => ({
     const normalized = normalizeHppEntries(entries);
     set({ hppEntries: normalized, hppError: null });
     try {
-      const res = await fetch("/api/hpp", {
+      const res = await fetch("/api/hpp/master", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ entries: normalized }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        if (res.status === 401) throw new Error("UNAUTHORIZED");
+        throw new Error(`HTTP ${res.status}`);
+      }
       await get().loadHpp();
       return true;
     } catch (e) {
+      if (e instanceof Error && e.message === "UNAUTHORIZED") {
+        set({ hppEntries: previousEntries });
+        return false;
+      }
       console.error("[replaceHppEntriesAndSync]", e);
       set({ hppEntries: previousEntries, hppError: "Gagal menyimpan data HPP" });
       return false;
@@ -328,7 +338,7 @@ export const useAppStore = create<AppStore>()((set, get) => ({
     set({ hppEntries: normalized });
     debouncedFetch(
       "sync-hpp",
-      "/api/hpp",
+      "/api/hpp/master",
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
