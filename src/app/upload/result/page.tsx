@@ -388,6 +388,8 @@ export default function UploadResultPage() {
   const [selectedHppOptionKey, setSelectedHppOptionKey] = useState("");
   const [hppMapperError, setHppMapperError] = useState<string | null>(null);
   const [savingHppMapping, setSavingHppMapping] = useState(false);
+  const [deletingSkuTargetKey, setDeletingSkuTargetKey] = useState<string | null>(null);
+  const [deleteSkuConfirming, setDeleteSkuConfirming] = useState(false);
 
   const syncSavedReportIfNeeded = async (report: RevenueReport) => {
     if (reportSource !== "saved" || !activeSavedReportId) return true;
@@ -1209,6 +1211,184 @@ export default function UploadResultPage() {
     notify("success", "Mapping HPP berhasil disimpan.");
   };
 
+  const handleDeleteSkuFromOrder = async (
+    order: EnrichedOrder,
+    skuDetail: { sku: string; products: string[]; allocatedRevenue: number; allocatedFee: number; hpp: number; qty: number }
+  ) => {
+    if (!uploadPreviewReport) return;
+
+    const confirmKey = `${order.marketplace}:${normalizeOrderId(order.orderId)}:${skuDetail.sku || skuDetail.products[0]}`;
+
+    // Two-click confirmation flow
+    if (!deleteSkuConfirming || deletingSkuTargetKey !== confirmKey) {
+      setDeleteSkuConfirming(true);
+      setDeletingSkuTargetKey(confirmKey);
+      return;
+    }
+    setDeleteSkuConfirming(false);
+    setDeletingSkuTargetKey(null);
+
+    const nextOrders: CalculatedOrder[] = [];
+    for (const currentOrder of uploadPreviewReport.orders) {
+      if (currentOrder.marketplace !== order.marketplace || normalizeOrderId(currentOrder.orderId) !== normalizeOrderId(order.orderId)) {
+        nextOrders.push(currentOrder);
+        continue;
+      }
+
+      // Path 1: order has lineItems → filter and recalculate from remaining lines
+      if (currentOrder.lineItems && currentOrder.lineItems.length > 0) {
+        const remainingLines = currentOrder.lineItems.filter((line) => {
+          const lineSkuKey = normalizeSkuKey(line.sku);
+          const targetSkuKey = normalizeSkuKey(skuDetail.sku);
+          const matchBySku = targetSkuKey && lineSkuKey === targetSkuKey;
+          const matchByProduct = !targetSkuKey && line.productName === skuDetail.products[0];
+          return !matchBySku && !matchByProduct;
+        });
+
+        // No lines remain → drop the order entirely
+        if (remainingLines.length === 0) {
+          continue;
+        }
+
+        const newRevenue = remainingLines.reduce((sum, line) => sum + line.revenue, 0);
+        const newHpp = remainingLines.reduce((sum, line) => sum + line.hpp, 0);
+        const newQty = remainingLines.reduce((sum, line) => sum + (line.qty || 0), 0);
+        const newFeesTotal = remainingLines.reduce((sum, line) => sum + line.platformFee, 0);
+        const feeScale = currentOrder.fees.totalPlatformFee > 0
+          ? newFeesTotal / currentOrder.fees.totalPlatformFee
+          : 1;
+        const newGrossProfit = newRevenue - newHpp;
+        const settlementAmount = currentOrder.settlementAmount ?? 0;
+        const newNetProfit = settlementAmount !== 0
+          ? settlementAmount * (newRevenue / Math.max(1, currentOrder.revenue || 1)) - newHpp
+          : newGrossProfit - newFeesTotal;
+
+        nextOrders.push({
+          ...currentOrder,
+          qty: newQty,
+          revenue: newRevenue,
+          hpp: newHpp,
+          grossProfit: newGrossProfit,
+          netProfit: newNetProfit,
+          grossMargin: newRevenue > 0 ? (newGrossProfit / newRevenue) * 100 : 0,
+          netMargin: newRevenue > 0 ? (newNetProfit / newRevenue) * 100 : 0,
+          fees: {
+            ...currentOrder.fees,
+            commissionFee: currentOrder.fees.commissionFee * feeScale,
+            transactionFee: currentOrder.fees.transactionFee * feeScale,
+            freeShippingFee: currentOrder.fees.freeShippingFee * feeScale,
+            orderProcessingFee: currentOrder.fees.orderProcessingFee * feeScale,
+            voucherBySeller: currentOrder.fees.voucherBySeller * feeScale,
+            affiliateCommission: currentOrder.fees.affiliateCommission * feeScale,
+            otherFees: currentOrder.fees.otherFees * feeScale,
+            totalPlatformFee: newFeesTotal,
+          },
+          lineItems: remainingLines,
+        });
+        continue;
+      }
+
+      // Path 2: no lineItems → proportional reduction based on revenue ratio
+      const orderRevenue = currentOrder.revenue || 1;
+      const revenueReductionRatio = skuDetail.allocatedRevenue / orderRevenue;
+      const newRevenue = currentOrder.revenue - skuDetail.allocatedRevenue;
+      const newHpp = currentOrder.hpp - skuDetail.hpp;
+      const newFeesTotal = currentOrder.fees.totalPlatformFee * (1 - revenueReductionRatio);
+      const newGrossProfit = newRevenue - newHpp;
+      const settlementAmount = currentOrder.settlementAmount ?? 0;
+      const newNetProfit = settlementAmount !== 0
+        ? settlementAmount * (1 - revenueReductionRatio) - newHpp
+        : newGrossProfit - newFeesTotal;
+
+      // If newRevenue is essentially zero, drop the order
+      if (newRevenue < 1) {
+        continue;
+      }
+
+      nextOrders.push({
+        ...currentOrder,
+        qty: Math.max(0, currentOrder.qty - skuDetail.qty),
+        revenue: newRevenue,
+        hpp: Math.max(0, newHpp),
+        grossProfit: newGrossProfit,
+        netProfit: newNetProfit,
+        grossMargin: newRevenue > 0 ? (newGrossProfit / newRevenue) * 100 : 0,
+        netMargin: newRevenue > 0 ? (newNetProfit / newRevenue) * 100 : 0,
+        fees: {
+          ...currentOrder.fees,
+          totalPlatformFee: newFeesTotal,
+        },
+      });
+    }
+
+    // Rebuild marketplace summaries
+    const marketplaceMap = new Map<MarketplaceId, CalculatedOrder[]>();
+    for (const ord of nextOrders) {
+      if (!marketplaceMap.has(ord.marketplace)) marketplaceMap.set(ord.marketplace, []);
+      marketplaceMap.get(ord.marketplace)!.push(ord);
+    }
+
+    const marketplaces: MarketplaceSummary[] = Array.from(marketplaceMap.entries()).map(
+      ([marketplace, orders]) => {
+        const mpRevenue = orders.reduce((s, o) => s + o.revenue, 0);
+        const mpHpp = orders.reduce((s, o) => s + o.hpp, 0);
+        const mpGrossProfit = mpRevenue - mpHpp;
+        const mpPlatformFees = orders.reduce((s, o) => s + o.fees.totalPlatformFee, 0);
+        const mpNetProfit = mpGrossProfit - mpPlatformFees;
+        const mpFeeBreakdown = orders.reduce(
+          (acc, o) => ({
+            commission: acc.commission + o.fees.commissionFee,
+            transactionFee: acc.transactionFee + o.fees.transactionFee,
+            freeShipping: acc.freeShipping + o.fees.freeShippingFee,
+            orderProcessing: acc.orderProcessing + o.fees.orderProcessingFee,
+            voucher: acc.voucher + o.fees.voucherBySeller,
+            affiliate: acc.affiliate + o.fees.affiliateCommission,
+            other: acc.other + o.fees.otherFees,
+          }),
+          { commission: 0, transactionFee: 0, freeShipping: 0, orderProcessing: 0, voucher: 0, affiliate: 0, other: 0 }
+        );
+        return {
+          marketplace,
+          totalOrders: orders.length,
+          totalRevenue: mpRevenue,
+          totalHpp: mpHpp,
+          totalGrossProfit: mpGrossProfit,
+          totalPlatformFees: mpPlatformFees,
+          totalNetProfit: mpNetProfit,
+          avgGrossMargin: mpRevenue > 0 ? (mpGrossProfit / mpRevenue) * 100 : 0,
+          avgNetMargin: mpRevenue > 0 ? (mpNetProfit / mpRevenue) * 100 : 0,
+          feeBreakdown: mpFeeBreakdown,
+        };
+      }
+    );
+
+    const totalRevenue = marketplaces.reduce((s, m) => s + m.totalRevenue, 0);
+    const totalHpp = marketplaces.reduce((s, m) => s + m.totalHpp, 0);
+    const totalGrossProfit = totalRevenue - totalHpp;
+    const totalPlatformFees = marketplaces.reduce((s, m) => s + m.totalPlatformFees, 0);
+
+    const nextReport: RevenueReport = {
+      ...uploadPreviewReport,
+      orders: nextOrders,
+      marketplaces,
+      totalRevenue,
+      totalHpp,
+      totalGrossProfit,
+      totalPlatformFees,
+      totalNetProfit: totalGrossProfit - totalPlatformFees,
+    };
+
+    setUploadPreviewReport(nextReport);
+    setSelectedOrder(null);
+
+    const ok = await syncSavedReportIfNeeded(nextReport);
+    if (!ok) {
+      notify("warning", "SKU berhasil dihapus dari pesanan. Perubahan hanya tersimpan lokal.");
+    } else {
+      notify("success", "SKU berhasil dihapus dari pesanan.");
+    }
+  };
+
   const handleRemoveHppForSku = async (skuDetail: { sku: string; products: string[] }) => {
     const label = skuDetail.sku && skuDetail.sku !== "-" ? skuDetail.sku : skuDetail.products[0] || "SKU ini";
     if (!confirm(`Hapus mapping HPP untuk "${label}"? Perhitungan HPP untuk SKU ini akan menjadi 0.`)) return;
@@ -1847,6 +2027,37 @@ export default function UploadResultPage() {
                                 Hapus HPP
                               </button>
                             )}
+                            {/* ── Delete SKU from order ── */}
+                            {(() => {
+                              const confirmKey = `${selectedOrder.marketplace}:${normalizeOrderId(selectedOrder.orderId)}:${skuDetail.sku || skuDetail.products[0]}`;
+                              const isConfirming = deletingSkuTargetKey === confirmKey && deleteSkuConfirming;
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteSkuFromOrder(selectedOrder, skuDetail)}
+                                  className={`rounded-md px-2 py-0.5 text-[10px] font-semibold transition-all ${
+                                    isConfirming
+                                      ? "border-2 border-rose-500 bg-rose-500 text-white shadow-md"
+                                      : "border border-rose-300/50 bg-rose-50/60 text-rose-600 hover:bg-rose-100/80"
+                                  }`}
+                                  title={
+                                    isConfirming
+                                      ? `Klik lagi untuk konfirmasi hapus SKU ${skuDetail.sku || skuDetail.products[0]} dari pesanan`
+                                      : `Hapus SKU ${skuDetail.sku || skuDetail.products[0]} dari pesanan ini`
+                                  }
+                                >
+                                  {isConfirming ? (
+                                    <span className="flex items-center gap-1">
+                                      <Trash2 className="h-3 w-3" /> Yakin hapus?
+                                    </span>
+                                  ) : (
+                                    <span className="flex items-center gap-1">
+                                      <Trash2 className="h-3 w-3" /> Hapus SKU
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })()}
                           </div>
                           <div className="sm:col-span-2"><span className="text-[var(--text-subtle)]">Produk:</span> <span className="text-[var(--text)]">{skuDetail.products.join(", ")}</span></div>
                         </div>
